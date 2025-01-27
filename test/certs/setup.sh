@@ -226,6 +226,10 @@ OPENSSL_KEYBITS=8192 \
 # self-signed end-entity cert with explicit keyUsage not including KeyCertSign
 openssl req -new -x509 -key ee-key.pem -subj /CN=ee-self-signed -out ee-self-signed.pem -addext keyUsage=digitalSignature -days 36525
 
+# self-signed end-entity cert signed with RSA-PSS
+openssl req -new -x509 -key ee-key.pem -subj /CN=ee-self-signed-pss -out ee-self-signed-pss.pem -days 36525 \
+    -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest
+
 # Proxy certificates, off of ee-client
 # Start with some good ones
 ./mkcert.sh req pc1-key "0.CN = server.example" "1.CN = proxy 1" | \
@@ -407,6 +411,17 @@ REQMASK=MASK:0x800 ./mkcert.sh req badalt7-key "O = Bad NC Test Certificate 7" \
     "email.1 = good@good.org" "email.2 = any@good.com" \
     "IP = 127.0.0.1" "IP = 192.168.0.1"
 
+# Certs for CVE-2022-4203 testcase
+
+NC="excluded;otherName:SRVName;UTF8STRING:foo@example.org" ./mkcert.sh genca \
+    "Test NC CA othername" nccaothername-key nccaothername-cert \
+    root-key root-cert
+
+./mkcert.sh req alt-email-key "O = NC email in othername Test Certificate" | \
+    ./mkcert.sh geneealt bad-othername-key bad-othername-cert \
+    nccaothername-key nccaothername-cert \
+    "otherName.1 = SRVName;UTF8STRING:foo@example.org"
+
 # RSA-PSS signatures
 # SHA1
 ./mkcert.sh genee PSS-SHA1 ee-key ee-pss-sha1-cert ca-key ca-cert \
@@ -454,3 +469,15 @@ OPENSSL_SIGALG=ED448 OPENSSL_KEYALG=ed448 ./mkcert.sh genee ed448 \
 
 # critical id-pkix-ocsp-no-check extension
 ./mkcert.sh geneeextra server.example ee-key ee-cert-ocsp-nocheck ca-key ca-cert "1.3.6.1.5.5.7.48.1.5=critical,DER:05:00"
+
+# certificatePolicies extension
+./mkcert.sh genca -c "1.3.6.1.4.1.16604.998855.1" "CA" ca-key ca-pol-cert root-key root-cert
+./mkcert.sh geneeextra server.example ee-key ee-cert-policies ca-key ca-cert "certificatePolicies=1.3.6.1.4.1.16604.998855.1"
+# We can create a cert with a duplicate policy oid - but its actually invalid!
+./mkcert.sh geneeextra server.example ee-key ee-cert-policies-bad ca-key ca-cert "certificatePolicies=1.3.6.1.4.1.16604.998855.1,1.3.6.1.4.1.16604.998855.1"
+
+# EC cert signed by curve ca with SHA3-224, SHA3-256, SHA3-384, SHA3-512
+OPENSSL_SIGALG="sha3-224" ./mkcert.sh genee server.example ee-key-ec-named-named ee-cert-ec-sha3-224 ca-key-ec-named ca-cert-ec-named
+OPENSSL_SIGALG="sha3-256" ./mkcert.sh genee server.example ee-key-ec-named-named ee-cert-ec-sha3-256 ca-key-ec-named ca-cert-ec-named
+OPENSSL_SIGALG="sha3-384" ./mkcert.sh genee server.example ee-key-ec-named-named ee-cert-ec-sha3-384 ca-key-ec-named ca-cert-ec-named
+OPENSSL_SIGALG="sha3-512" ./mkcert.sh genee server.example ee-key-ec-named-named ee-cert-ec-sha3-512 ca-key-ec-named ca-cert-ec-named

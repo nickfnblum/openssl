@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -41,7 +41,7 @@
 #  endif
 #  if !defined(IPPROTO_IP)
     /* winsock[2].h was included already? */
-#   include <winsock.h>
+#   include "internal/e_winsock.h"
 #  endif
 #  ifdef getservbyname
      /* this is used to be wcecompat/include/winsock_extras.h */
@@ -54,7 +54,7 @@ struct servent *PASCAL getservbyname(const char *, const char *);
  * Even though sizeof(SOCKET) is 8, it's safe to cast it to int, because
  * the value constitutes an index in per-process table of limited size
  * and not a real pointer. And we also depend on fact that all processors
- * Windows run on happen to be two's-complement, which allows to
+ * Windows run on happen to be two's complement, which allows to
  * interchange INVALID_SOCKET and -1.
  */
 #   define socket(d,t,p)   ((int)socket(d,t,p))
@@ -89,11 +89,15 @@ struct servent *PASCAL getservbyname(const char *, const char *);
 #  endif
 
 #  include <netdb.h>
+#  if defined(OPENSSL_SYS_VMS)
+typedef size_t socklen_t;        /* Currently appears to be missing on VMS */
+#  endif
 #  if defined(OPENSSL_SYS_VMS_NODECC)
 #   include <socket.h>
 #   include <in.h>
 #   include <inet.h>
 #  else
+#   include <poll.h>
 #   include <sys/socket.h>
 #   if !defined(NO_SYS_UN_H) && defined(AF_UNIX) && !defined(OPENSSL_NO_UNIX_SOCK)
 #    include <sys/un.h>
@@ -111,6 +115,13 @@ struct servent *PASCAL getservbyname(const char *, const char *);
 
 #  ifdef OPENSSL_SYS_AIX
 #   include <sys/select.h>
+#  endif
+
+#  ifdef OPENSSL_SYS_UNIX
+#    ifndef OPENSSL_SYS_TANDEM
+#     include <poll.h>
+#    endif
+#    include <errno.h>
 #  endif
 
 #  ifndef VMS
@@ -154,12 +165,15 @@ struct servent *PASCAL getservbyname(const char *, const char *);
 
 # define get_last_socket_error() errno
 # define clear_socket_error()    errno=0
+# define get_last_socket_error_is_eintr() (get_last_socket_error() == EINTR)
 
 # if defined(OPENSSL_SYS_WINDOWS)
 #  undef get_last_socket_error
 #  undef clear_socket_error
+#  undef get_last_socket_error_is_eintr
 #  define get_last_socket_error() WSAGetLastError()
 #  define clear_socket_error()    WSASetLastError(0)
+#  define get_last_socket_error_is_eintr() (get_last_socket_error() == WSAEINTR)
 #  define readsocket(s,b,n)       recv((s),(b),(n),0)
 #  define writesocket(s,b,n)      send((s),(b),(n),0)
 # elif defined(__DJGPP__)
@@ -177,14 +191,8 @@ struct servent *PASCAL getservbyname(const char *, const char *);
 #  define readsocket(s,b,n)           read((s),(b),(n))
 #  define writesocket(s,b,n)          write((s),(char *)(b),(n))
 # elif defined(OPENSSL_SYS_TANDEM)
-#  if defined(OPENSSL_TANDEM_FLOSS)
-#   include <floss.h(floss_read, floss_write)>
-#   define readsocket(s,b,n)       floss_read((s),(b),(n))
-#   define writesocket(s,b,n)      floss_write((s),(b),(n))
-#  else
-#   define readsocket(s,b,n)       read((s),(b),(n))
-#   define writesocket(s,b,n)      write((s),(b),(n))
-#  endif
+#  define readsocket(s,b,n)       read((s),(b),(n))
+#  define writesocket(s,b,n)      write((s),(b),(n))
 #  define ioctlsocket(a,b,c)      ioctl(a,b,c)
 #  define closesocket(s)          close(s)
 # else

@@ -1,5 +1,5 @@
 /*
-* Copyright 2022 The OpenSSL Project Authors. All Rights Reserved.
+* Copyright 2022-2023 The OpenSSL Project Authors. All Rights Reserved.
 *
 * Licensed under the Apache License 2.0 (the "License").  You may not use
 * this file except in compliance with the License.  You can obtain a copy
@@ -11,79 +11,83 @@
 # define OSSL_INTERNAL_QUIC_WIRE_H
 # pragma once
 
-#include "internal/e_os.h"
-#include "internal/time.h"
-#include "internal/quic_types.h"
-#include "internal/packet.h"
+# include "internal/e_os.h"
+# include "internal/time.h"
+# include "internal/quic_types.h"
+# include "internal/packet_quic.h"
 
-#define OSSL_QUIC_FRAME_TYPE_PADDING                0x00
-#define OSSL_QUIC_FRAME_TYPE_PING                   0x01
-#define OSSL_QUIC_FRAME_TYPE_ACK_WITHOUT_ECN        0x02
-#define OSSL_QUIC_FRAME_TYPE_ACK_WITH_ECN           0x03
-#define OSSL_QUIC_FRAME_TYPE_RESET_STREAM           0x04
-#define OSSL_QUIC_FRAME_TYPE_STOP_SENDING           0x05
-#define OSSL_QUIC_FRAME_TYPE_CRYPTO                 0x06
-#define OSSL_QUIC_FRAME_TYPE_NEW_TOKEN              0x07
-#define OSSL_QUIC_FRAME_TYPE_MAX_DATA               0x10
-#define OSSL_QUIC_FRAME_TYPE_MAX_STREAM_DATA        0x11
-#define OSSL_QUIC_FRAME_TYPE_MAX_STREAMS_BIDI       0x12
-#define OSSL_QUIC_FRAME_TYPE_MAX_STREAMS_UNI        0x13
-#define OSSL_QUIC_FRAME_TYPE_DATA_BLOCKED           0x14
-#define OSSL_QUIC_FRAME_TYPE_STREAM_DATA_BLOCKED    0x15
-#define OSSL_QUIC_FRAME_TYPE_STREAMS_BLOCKED_BIDI   0x16
-#define OSSL_QUIC_FRAME_TYPE_STREAMS_BLOCKED_UNI    0x17
-#define OSSL_QUIC_FRAME_TYPE_NEW_CONN_ID            0x18
-#define OSSL_QUIC_FRAME_TYPE_RETIRE_CONN_ID         0x19
-#define OSSL_QUIC_FRAME_TYPE_PATH_CHALLENGE         0x1A
-#define OSSL_QUIC_FRAME_TYPE_PATH_RESPONSE          0x1B
-#define OSSL_QUIC_FRAME_TYPE_CONN_CLOSE_TRANSPORT   0x1C
-#define OSSL_QUIC_FRAME_TYPE_CONN_CLOSE_APP         0x1D
-#define OSSL_QUIC_FRAME_TYPE_HANDSHAKE_DONE         0x1E
+# ifndef OPENSSL_NO_QUIC
 
-#define OSSL_QUIC_FRAME_FLAG_STREAM_FIN         0x01
-#define OSSL_QUIC_FRAME_FLAG_STREAM_LEN         0x02
-#define OSSL_QUIC_FRAME_FLAG_STREAM_OFF         0x04
-#define OSSL_QUIC_FRAME_FLAG_STREAM_MASK        ((uint64_t)0x07)
+#  define OSSL_QUIC_FRAME_TYPE_PADDING                0x00
+#  define OSSL_QUIC_FRAME_TYPE_PING                   0x01
+#  define OSSL_QUIC_FRAME_TYPE_ACK_WITHOUT_ECN        0x02
+#  define OSSL_QUIC_FRAME_TYPE_ACK_WITH_ECN           0x03
+#  define OSSL_QUIC_FRAME_TYPE_RESET_STREAM           0x04
+#  define OSSL_QUIC_FRAME_TYPE_STOP_SENDING           0x05
+#  define OSSL_QUIC_FRAME_TYPE_CRYPTO                 0x06
+#  define OSSL_QUIC_FRAME_TYPE_NEW_TOKEN              0x07
+#  define OSSL_QUIC_FRAME_TYPE_MAX_DATA               0x10
+#  define OSSL_QUIC_FRAME_TYPE_MAX_STREAM_DATA        0x11
+#  define OSSL_QUIC_FRAME_TYPE_MAX_STREAMS_BIDI       0x12
+#  define OSSL_QUIC_FRAME_TYPE_MAX_STREAMS_UNI        0x13
+#  define OSSL_QUIC_FRAME_TYPE_DATA_BLOCKED           0x14
+#  define OSSL_QUIC_FRAME_TYPE_STREAM_DATA_BLOCKED    0x15
+#  define OSSL_QUIC_FRAME_TYPE_STREAMS_BLOCKED_BIDI   0x16
+#  define OSSL_QUIC_FRAME_TYPE_STREAMS_BLOCKED_UNI    0x17
+#  define OSSL_QUIC_FRAME_TYPE_NEW_CONN_ID            0x18
+#  define OSSL_QUIC_FRAME_TYPE_RETIRE_CONN_ID         0x19
+#  define OSSL_QUIC_FRAME_TYPE_PATH_CHALLENGE         0x1A
+#  define OSSL_QUIC_FRAME_TYPE_PATH_RESPONSE          0x1B
+#  define OSSL_QUIC_FRAME_TYPE_CONN_CLOSE_TRANSPORT   0x1C
+#  define OSSL_QUIC_FRAME_TYPE_CONN_CLOSE_APP         0x1D
+#  define OSSL_QUIC_FRAME_TYPE_HANDSHAKE_DONE         0x1E
+
+#  define OSSL_QUIC_FRAME_FLAG_STREAM_FIN         0x01
+#  define OSSL_QUIC_FRAME_FLAG_STREAM_LEN         0x02
+#  define OSSL_QUIC_FRAME_FLAG_STREAM_OFF         0x04
+#  define OSSL_QUIC_FRAME_FLAG_STREAM_MASK        ((uint64_t)0x07)
 
 /* Low 3 bits of the type contain flags */
-#define OSSL_QUIC_FRAME_TYPE_STREAM             0x08             /* base ID */
-#define OSSL_QUIC_FRAME_TYPE_STREAM_FIN         \
-    (OSSL_QUIC_FRAME_TYPE_STREAM |              \
+#  define OSSL_QUIC_FRAME_TYPE_STREAM             0x08             /* base ID */
+#  define OSSL_QUIC_FRAME_TYPE_STREAM_FIN         \
+    (OSSL_QUIC_FRAME_TYPE_STREAM |                \
      OSSL_QUIC_FRAME_FLAG_STREAM_FIN)
-#define OSSL_QUIC_FRAME_TYPE_STREAM_LEN         \
-    (OSSL_QUIC_FRAME_TYPE_STREAM |              \
+#  define OSSL_QUIC_FRAME_TYPE_STREAM_LEN         \
+    (OSSL_QUIC_FRAME_TYPE_STREAM |                \
      OSSL_QUIC_FRAME_FLAG_STREAM_LEN)
-#define OSSL_QUIC_FRAME_TYPE_STREAM_LEN_FIN     \
-    (OSSL_QUIC_FRAME_TYPE_STREAM |              \
-     OSSL_QUIC_FRAME_FLAG_STREAM_LEN |          \
+#  define OSSL_QUIC_FRAME_TYPE_STREAM_LEN_FIN     \
+    (OSSL_QUIC_FRAME_TYPE_STREAM |                \
+     OSSL_QUIC_FRAME_FLAG_STREAM_LEN |            \
      OSSL_QUIC_FRAME_FLAG_STREAM_FIN)
-#define OSSL_QUIC_FRAME_TYPE_STREAM_OFF         \
-    (OSSL_QUIC_FRAME_TYPE_STREAM |              \
+#  define OSSL_QUIC_FRAME_TYPE_STREAM_OFF         \
+    (OSSL_QUIC_FRAME_TYPE_STREAM |                \
      OSSL_QUIC_FRAME_FLAG_STREAM_OFF)
-#define OSSL_QUIC_FRAME_TYPE_STREAM_OFF_FIN     \
-    (OSSL_QUIC_FRAME_TYPE_STREAM |              \
-     OSSL_QUIC_FRAME_FLAG_STREAM_OFF |          \
+#  define OSSL_QUIC_FRAME_TYPE_STREAM_OFF_FIN     \
+    (OSSL_QUIC_FRAME_TYPE_STREAM |                \
+     OSSL_QUIC_FRAME_FLAG_STREAM_OFF |            \
      OSSL_QUIC_FRAME_FLAG_STREAM_FIN)
-#define OSSL_QUIC_FRAME_TYPE_STREAM_OFF_LEN     \
-    (OSSL_QUIC_FRAME_TYPE_STREAM |              \
-     OSSL_QUIC_FRAME_FLAG_STREAM_OFF |          \
+#  define OSSL_QUIC_FRAME_TYPE_STREAM_OFF_LEN     \
+    (OSSL_QUIC_FRAME_TYPE_STREAM |                \
+     OSSL_QUIC_FRAME_FLAG_STREAM_OFF |            \
      OSSL_QUIC_FRAME_FLAG_STREAM_LEN)
-#define OSSL_QUIC_FRAME_TYPE_STREAM_OFF_LEN_FIN \
-    (OSSL_QUIC_FRAME_TYPE_STREAM |              \
-     OSSL_QUIC_FRAME_FLAG_STREAM_OFF |          \
-     OSSL_QUIC_FRAME_FLAG_STREAM_LEN |          \
+#  define OSSL_QUIC_FRAME_TYPE_STREAM_OFF_LEN_FIN \
+    (OSSL_QUIC_FRAME_TYPE_STREAM |                \
+     OSSL_QUIC_FRAME_FLAG_STREAM_OFF |            \
+     OSSL_QUIC_FRAME_FLAG_STREAM_LEN |            \
      OSSL_QUIC_FRAME_FLAG_STREAM_FIN)
 
-#define OSSL_QUIC_FRAME_TYPE_IS_STREAM(x) \
+#  define OSSL_QUIC_FRAME_TYPE_IS_STREAM(x) \
     (((x) & ~OSSL_QUIC_FRAME_FLAG_STREAM_MASK) == OSSL_QUIC_FRAME_TYPE_STREAM)
-#define OSSL_QUIC_FRAME_TYPE_IS_ACK(x) \
+#  define OSSL_QUIC_FRAME_TYPE_IS_ACK(x) \
     (((x) & ~(uint64_t)1) == OSSL_QUIC_FRAME_TYPE_ACK_WITHOUT_ECN)
-#define OSSL_QUIC_FRAME_TYPE_IS_MAX_STREAMS(x) \
+#  define OSSL_QUIC_FRAME_TYPE_IS_MAX_STREAMS(x) \
     (((x) & ~(uint64_t)1) == OSSL_QUIC_FRAME_TYPE_MAX_STREAMS_BIDI)
-#define OSSL_QUIC_FRAME_TYPE_IS_STREAMS_BLOCKED(x) \
+#  define OSSL_QUIC_FRAME_TYPE_IS_STREAMS_BLOCKED(x) \
     (((x) & ~(uint64_t)1) == OSSL_QUIC_FRAME_TYPE_STREAMS_BLOCKED_BIDI)
-#define OSSL_QUIC_FRAME_TYPE_IS_CONN_CLOSE(x) \
+#  define OSSL_QUIC_FRAME_TYPE_IS_CONN_CLOSE(x) \
     (((x) & ~(uint64_t)1) == OSSL_QUIC_FRAME_TYPE_CONN_CLOSE_TRANSPORT)
+
+const char *ossl_quic_frame_type_to_string(uint64_t frame_type);
 
 static ossl_unused ossl_inline int
 ossl_quic_frame_type_is_ack_eliciting(uint64_t frame_type)
@@ -99,6 +103,25 @@ ossl_quic_frame_type_is_ack_eliciting(uint64_t frame_type)
         return 1;
     }
 }
+
+/* QUIC Transport Parameter Types */
+#  define QUIC_TPARAM_ORIG_DCID                           0x00
+#  define QUIC_TPARAM_MAX_IDLE_TIMEOUT                    0x01
+#  define QUIC_TPARAM_STATELESS_RESET_TOKEN               0x02
+#  define QUIC_TPARAM_MAX_UDP_PAYLOAD_SIZE                0x03
+#  define QUIC_TPARAM_INITIAL_MAX_DATA                    0x04
+#  define QUIC_TPARAM_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL  0x05
+#  define QUIC_TPARAM_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE 0x06
+#  define QUIC_TPARAM_INITIAL_MAX_STREAM_DATA_UNI         0x07
+#  define QUIC_TPARAM_INITIAL_MAX_STREAMS_BIDI            0x08
+#  define QUIC_TPARAM_INITIAL_MAX_STREAMS_UNI             0x09
+#  define QUIC_TPARAM_ACK_DELAY_EXP                       0x0A
+#  define QUIC_TPARAM_MAX_ACK_DELAY                       0x0B
+#  define QUIC_TPARAM_DISABLE_ACTIVE_MIGRATION            0x0C
+#  define QUIC_TPARAM_PREFERRED_ADDR                      0x0D
+#  define QUIC_TPARAM_ACTIVE_CONN_ID_LIMIT                0x0E
+#  define QUIC_TPARAM_INITIAL_SCID                        0x0F
+#  define QUIC_TPARAM_RETRY_SCID                          0x10
 
 /*
  * QUIC Frame Logical Representations
@@ -137,6 +160,9 @@ typedef struct ossl_quic_frame_ack_st {
     uint64_t                    ect0, ect1, ecnce;
     unsigned int                ecn_present : 1;
 } OSSL_QUIC_FRAME_ACK;
+
+/* Returns 1 if the given frame contains the given PN. */
+int ossl_quic_frame_ack_contains_pn(const OSSL_QUIC_FRAME_ACK *ack, QUIC_PN pn);
 
 /* QUIC Frame: STREAM */
 typedef struct ossl_quic_frame_stream_st {
@@ -182,10 +208,10 @@ typedef struct ossl_quic_frame_stop_sending_st {
 
 /* QUIC Frame: NEW_CONNECTION_ID */
 typedef struct ossl_quic_frame_new_conn_id_st {
-    uint64_t              seq_num;
-    uint64_t              retire_prior_to;
-    QUIC_CONN_ID          conn_id;
-    unsigned char         stateless_reset_token[16];
+    uint64_t                    seq_num;
+    uint64_t                    retire_prior_to;
+    QUIC_CONN_ID                conn_id;
+    QUIC_STATELESS_RESET_TOKEN  stateless_reset;
 } OSSL_QUIC_FRAME_NEW_CONN_ID;
 
 /* QUIC Frame: CONNECTION_CLOSE */
@@ -438,6 +464,14 @@ int ossl_quic_wire_encode_transport_param_int(WPACKET *pkt,
                                               uint64_t value);
 
 /*
+ * Encodes a QUIC transport parameter TLV with a given ID into the WPACKET.
+ * The payload is a QUIC connection ID.
+ */
+int ossl_quic_wire_encode_transport_param_cid(WPACKET *wpkt,
+                                              uint64_t id,
+                                              const QUIC_CONN_ID *cid);
+
+/*
  * QUIC Wire Format Decoding
  * =========================
  *
@@ -461,7 +495,8 @@ int ossl_quic_wire_encode_transport_param_int(WPACKET *pkt,
  * position). This can be used to determine the frame type and determine which
  * frame decoding function to call.
  */
-int ossl_quic_wire_peek_frame_header(PACKET *pkt, uint64_t *type);
+int ossl_quic_wire_peek_frame_header(PACKET *pkt, uint64_t *type,
+                                     int *was_minimal);
 
 /*
  * Like ossl_quic_wire_peek_frame_header, but advances the current position
@@ -528,9 +563,11 @@ int ossl_quic_wire_decode_frame_stop_sending(PACKET *pkt,
  * Decodes a QUIC CRYPTO frame.
  *
  * f->data is set to point inside the packet buffer inside the PACKET, therefore
- * it is safe to access for as long as the packet buffer exists.
+ * it is safe to access for as long as the packet buffer exists. If nodata is
+ * set to 1 then reading the PACKET stops after the frame header and f->data is
+ * set to NULL.
  */
-int ossl_quic_wire_decode_frame_crypto(PACKET *pkt,
+int ossl_quic_wire_decode_frame_crypto(PACKET *pkt, int nodata,
                                        OSSL_QUIC_FRAME_CRYPTO *f);
 
 /*
@@ -543,6 +580,10 @@ int ossl_quic_wire_decode_frame_new_token(PACKET               *pkt,
 
 /*
  * Decodes a QUIC STREAM frame.
+ *
+ * If nodata is set to 1 then reading the PACKET stops after the frame header
+ * and f->data is set to NULL. In this case f->len will also be 0 in the event
+ * that "has_explicit_len" is 0.
  *
  * If the frame did not contain an offset field, f->offset is set to 0, as the
  * absence of an offset field is equivalent to an offset of 0.
@@ -566,7 +607,7 @@ int ossl_quic_wire_decode_frame_new_token(PACKET               *pkt,
  * f->is_fin is set according to whether the frame was marked as ending the
  * stream.
  */
-int ossl_quic_wire_decode_frame_stream(PACKET *pkt,
+int ossl_quic_wire_decode_frame_stream(PACKET *pkt, int nodata,
                                        OSSL_QUIC_FRAME_STREAM *f);
 
 /*
@@ -696,8 +737,8 @@ int ossl_quic_wire_peek_transport_param(PACKET *pkt, uint64_t *id);
  * returned on success. This points inside the PACKET's buffer and is therefore
  * valid as long as the PACKET's buffer is valid.
  *
- * The transport parameter ID is written to *id and the length of the payload
- * in bytes is written to *len.
+ * The transport parameter ID is written to *id (if non-NULL) and the length of
+ * the payload in bytes is written to *len.
  *
  * Returns NULL on failure.
  */
@@ -708,11 +749,36 @@ const unsigned char *ossl_quic_wire_decode_transport_param_bytes(PACKET *pkt,
 /*
  * Decodes a QUIC transport parameter TLV containing a variable-length integer.
  *
- * The transport parameter ID is written to *id and the value is written to
- * *value.
+ * The transport parameter ID is written to *id (if non-NULL) and the value is
+ * written to *value.
  */
 int ossl_quic_wire_decode_transport_param_int(PACKET *pkt,
                                               uint64_t *id,
                                               uint64_t *value);
+
+/*
+ * Decodes a QUIC transport parameter TLV containing a connection ID.
+ *
+ * The transport parameter ID is written to *id (if non-NULL) and the value is
+ * written to *value.
+ */
+int ossl_quic_wire_decode_transport_param_cid(PACKET *pkt,
+                                              uint64_t *id,
+                                              QUIC_CONN_ID *cid);
+
+/*
+ * Decodes a QUIC transport parameter TLV containing a preferred_address.
+ */
+typedef struct quic_preferred_addr_st {
+    uint16_t                    ipv4_port, ipv6_port;
+    unsigned char               ipv4[4], ipv6[16];
+    QUIC_STATELESS_RESET_TOKEN  stateless_reset;
+    QUIC_CONN_ID                cid;
+} QUIC_PREFERRED_ADDR;
+
+int ossl_quic_wire_decode_transport_param_preferred_addr(PACKET *pkt,
+                                                         QUIC_PREFERRED_ADDR *p);
+
+# endif
 
 #endif

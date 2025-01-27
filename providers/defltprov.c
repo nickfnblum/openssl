@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2019-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -103,6 +103,7 @@ static const OSSL_ALGORITHM deflt_digests[] = {
     { PROV_NAMES_SHA1, "provider=default", ossl_sha1_functions },
     { PROV_NAMES_SHA2_224, "provider=default", ossl_sha224_functions },
     { PROV_NAMES_SHA2_256, "provider=default", ossl_sha256_functions },
+    { PROV_NAMES_SHA2_256_192, "provider=default", ossl_sha256_192_functions },
     { PROV_NAMES_SHA2_384, "provider=default", ossl_sha384_functions },
     { PROV_NAMES_SHA2_512, "provider=default", ossl_sha512_functions },
     { PROV_NAMES_SHA2_512_224, "provider=default", ossl_sha512_224_functions },
@@ -355,6 +356,11 @@ static const OSSL_ALGORITHM deflt_kdfs[] = {
     { PROV_NAMES_KRB5KDF, "provider=default", ossl_kdf_krb5kdf_functions },
     { PROV_NAMES_HMAC_DRBG_KDF, "provider=default",
       ossl_kdf_hmac_drbg_functions },
+#ifndef OPENSSL_NO_ARGON2
+    { PROV_NAMES_ARGON2I, "provider=default", ossl_kdf_argon2i_functions },
+    { PROV_NAMES_ARGON2D, "provider=default", ossl_kdf_argon2d_functions },
+    { PROV_NAMES_ARGON2ID, "provider=default", ossl_kdf_argon2id_functions },
+#endif
     { NULL, NULL, NULL }
 };
 
@@ -364,8 +370,10 @@ static const OSSL_ALGORITHM deflt_keyexch[] = {
 #endif
 #ifndef OPENSSL_NO_EC
     { PROV_NAMES_ECDH, "provider=default", ossl_ecdh_keyexch_functions },
+# ifndef OPENSSL_NO_ECX
     { PROV_NAMES_X25519, "provider=default", ossl_x25519_keyexch_functions },
     { PROV_NAMES_X448, "provider=default", ossl_x448_keyexch_functions },
+# endif
 #endif
     { PROV_NAMES_TLS1_PRF, "provider=default", ossl_kdf_tls1_prf_keyexch_functions },
     { PROV_NAMES_HKDF, "provider=default", ossl_kdf_hkdf_keyexch_functions },
@@ -379,6 +387,9 @@ static const OSSL_ALGORITHM deflt_rands[] = {
     { PROV_NAMES_HASH_DRBG, "provider=default", ossl_drbg_hash_functions },
     { PROV_NAMES_HMAC_DRBG, "provider=default", ossl_drbg_ossl_hmac_functions },
     { PROV_NAMES_SEED_SRC, "provider=default", ossl_seed_src_functions },
+#ifndef OPENSSL_NO_JITTER
+    { PROV_NAMES_JITTER, "provider=default", ossl_jitter_functions },
+#endif
     { PROV_NAMES_TEST_RAND, "provider=default", ossl_test_rng_functions },
     { NULL, NULL, NULL }
 };
@@ -386,12 +397,52 @@ static const OSSL_ALGORITHM deflt_rands[] = {
 static const OSSL_ALGORITHM deflt_signature[] = {
 #ifndef OPENSSL_NO_DSA
     { PROV_NAMES_DSA, "provider=default", ossl_dsa_signature_functions },
+    { PROV_NAMES_DSA_SHA1, "provider=default", ossl_dsa_sha1_signature_functions },
+    { PROV_NAMES_DSA_SHA224, "provider=default", ossl_dsa_sha224_signature_functions },
+    { PROV_NAMES_DSA_SHA256, "provider=default", ossl_dsa_sha256_signature_functions },
+    { PROV_NAMES_DSA_SHA384, "provider=default", ossl_dsa_sha384_signature_functions },
+    { PROV_NAMES_DSA_SHA512, "provider=default", ossl_dsa_sha512_signature_functions },
+    { PROV_NAMES_DSA_SHA3_224, "provider=default", ossl_dsa_sha3_224_signature_functions },
+    { PROV_NAMES_DSA_SHA3_256, "provider=default", ossl_dsa_sha3_256_signature_functions },
+    { PROV_NAMES_DSA_SHA3_384, "provider=default", ossl_dsa_sha3_384_signature_functions },
+    { PROV_NAMES_DSA_SHA3_512, "provider=default", ossl_dsa_sha3_512_signature_functions },
 #endif
     { PROV_NAMES_RSA, "provider=default", ossl_rsa_signature_functions },
+#if !defined(OPENSSL_NO_RMD160) && !defined(FIPS_MODULE)
+    { PROV_NAMES_RSA_RIPEMD160, "provider=default", ossl_rsa_ripemd160_signature_functions },
+#endif
+    { PROV_NAMES_RSA_SHA1, "provider=default", ossl_rsa_sha1_signature_functions },
+    { PROV_NAMES_RSA_SHA224, "provider=default", ossl_rsa_sha224_signature_functions },
+    { PROV_NAMES_RSA_SHA256, "provider=default", ossl_rsa_sha256_signature_functions },
+    { PROV_NAMES_RSA_SHA384, "provider=default", ossl_rsa_sha384_signature_functions },
+    { PROV_NAMES_RSA_SHA512, "provider=default", ossl_rsa_sha512_signature_functions },
+    { PROV_NAMES_RSA_SHA512_224, "provider=default", ossl_rsa_sha512_224_signature_functions },
+    { PROV_NAMES_RSA_SHA512_256, "provider=default", ossl_rsa_sha512_256_signature_functions },
+    { PROV_NAMES_RSA_SHA3_224, "provider=default", ossl_rsa_sha3_224_signature_functions },
+    { PROV_NAMES_RSA_SHA3_256, "provider=default", ossl_rsa_sha3_256_signature_functions },
+    { PROV_NAMES_RSA_SHA3_384, "provider=default", ossl_rsa_sha3_384_signature_functions },
+    { PROV_NAMES_RSA_SHA3_512, "provider=default", ossl_rsa_sha3_512_signature_functions },
+#ifndef OPENSSL_NO_SM3
+    { PROV_NAMES_RSA_SM3, "provider=default", ossl_rsa_sm3_signature_functions },
+#endif
 #ifndef OPENSSL_NO_EC
+# ifndef OPENSSL_NO_ECX
     { PROV_NAMES_ED25519, "provider=default", ossl_ed25519_signature_functions },
+    { PROV_NAMES_ED25519ph, "provider=default", ossl_ed25519ph_signature_functions },
+    { PROV_NAMES_ED25519ctx, "provider=default", ossl_ed25519ctx_signature_functions },
     { PROV_NAMES_ED448, "provider=default", ossl_ed448_signature_functions },
+    { PROV_NAMES_ED448ph, "provider=default", ossl_ed448ph_signature_functions },
+# endif
     { PROV_NAMES_ECDSA, "provider=default", ossl_ecdsa_signature_functions },
+    { PROV_NAMES_ECDSA_SHA1, "provider=default", ossl_ecdsa_sha1_signature_functions },
+    { PROV_NAMES_ECDSA_SHA224, "provider=default", ossl_ecdsa_sha224_signature_functions },
+    { PROV_NAMES_ECDSA_SHA256, "provider=default", ossl_ecdsa_sha256_signature_functions },
+    { PROV_NAMES_ECDSA_SHA384, "provider=default", ossl_ecdsa_sha384_signature_functions },
+    { PROV_NAMES_ECDSA_SHA512, "provider=default", ossl_ecdsa_sha512_signature_functions },
+    { PROV_NAMES_ECDSA_SHA3_224, "provider=default", ossl_ecdsa_sha3_224_signature_functions },
+    { PROV_NAMES_ECDSA_SHA3_256, "provider=default", ossl_ecdsa_sha3_256_signature_functions },
+    { PROV_NAMES_ECDSA_SHA3_384, "provider=default", ossl_ecdsa_sha3_384_signature_functions },
+    { PROV_NAMES_ECDSA_SHA3_512, "provider=default", ossl_ecdsa_sha3_512_signature_functions },
 # ifndef OPENSSL_NO_SM2
     { PROV_NAMES_SM2, "provider=default", ossl_sm2_signature_functions },
 # endif
@@ -420,8 +471,10 @@ static const OSSL_ALGORITHM deflt_asym_cipher[] = {
 static const OSSL_ALGORITHM deflt_asym_kem[] = {
     { PROV_NAMES_RSA, "provider=default", ossl_rsa_asym_kem_functions },
 #ifndef OPENSSL_NO_EC
+# ifndef OPENSSL_NO_ECX
     { PROV_NAMES_X25519, "provider=default", ossl_ecx_asym_kem_functions },
     { PROV_NAMES_X448, "provider=default", ossl_ecx_asym_kem_functions },
+# endif
     { PROV_NAMES_EC, "provider=default", ossl_ec_asym_kem_functions },
 #endif
     { NULL, NULL, NULL }
@@ -445,6 +498,7 @@ static const OSSL_ALGORITHM deflt_keymgmt[] = {
 #ifndef OPENSSL_NO_EC
     { PROV_NAMES_EC, "provider=default", ossl_ec_keymgmt_functions,
       PROV_DESCS_EC },
+# ifndef OPENSSL_NO_ECX
     { PROV_NAMES_X25519, "provider=default", ossl_x25519_keymgmt_functions,
       PROV_DESCS_X25519 },
     { PROV_NAMES_X448, "provider=default", ossl_x448_keymgmt_functions,
@@ -453,6 +507,7 @@ static const OSSL_ALGORITHM deflt_keymgmt[] = {
       PROV_DESCS_ED25519 },
     { PROV_NAMES_ED448, "provider=default", ossl_ed448_keymgmt_functions,
       PROV_DESCS_ED448 },
+# endif
 #endif
     { PROV_NAMES_TLS1_PRF, "provider=default", ossl_kdf_keymgmt_functions,
       PROV_DESCS_TLS1_PRF_SIGN },
@@ -552,7 +607,7 @@ static const OSSL_DISPATCH deflt_dispatch_table[] = {
     { OSSL_FUNC_PROVIDER_QUERY_OPERATION, (void (*)(void))deflt_query },
     { OSSL_FUNC_PROVIDER_GET_CAPABILITIES,
       (void (*)(void))ossl_prov_get_capabilities },
-    { 0, NULL }
+    OSSL_DISPATCH_END
 };
 
 OSSL_provider_init_fn ossl_default_provider_init;
@@ -606,6 +661,7 @@ int ossl_default_provider_init(const OSSL_CORE_HANDLE *handle,
                                        (OSSL_LIB_CTX *)c_get_libctx(handle));
     ossl_prov_ctx_set0_handle(*provctx, handle);
     ossl_prov_ctx_set0_core_bio_method(*provctx, corebiometh);
+    ossl_prov_ctx_set0_core_get_params(*provctx, c_get_params);
 
     *out = deflt_dispatch_table;
     ossl_prov_cache_exported_algorithms(deflt_ciphers, exported_ciphers);

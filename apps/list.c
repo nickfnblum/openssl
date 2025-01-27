@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -9,6 +9,8 @@
 
 /* We need to use some deprecated APIs */
 #define OPENSSL_SUPPRESS_DEPRECATED
+
+#include "internal/e_os.h"
 
 #include <string.h>
 #include <openssl/evp.h>
@@ -21,6 +23,7 @@
 #include <openssl/store.h>
 #include <openssl/core_names.h>
 #include <openssl/rand.h>
+#include <openssl/tls1.h>
 #include "apps.h"
 #include "app_params.h"
 #include "progs.h"
@@ -71,7 +74,7 @@ static void legacy_cipher_fn(const EVP_CIPHER *c,
 {
     if (select_name != NULL
         && (c == NULL
-            || OPENSSL_strcasecmp(select_name,  EVP_CIPHER_get0_name(c)) != 0))
+            || OPENSSL_strcasecmp(select_name, EVP_CIPHER_get0_name(c)) != 0))
         return;
     if (c != NULL) {
         BIO_printf(arg, "  %s\n", EVP_CIPHER_get0_name(c));
@@ -747,6 +750,54 @@ static void list_signatures(void)
         BIO_printf(bio_out, " -\n");
 }
 
+static int list_provider_tls_sigalgs(const OSSL_PARAM params[], void *data)
+{
+    const OSSL_PARAM *p;
+
+    /* Get registered IANA name */
+    p = OSSL_PARAM_locate_const(params, OSSL_CAPABILITY_TLS_SIGALG_IANA_NAME);
+    if (p != NULL && p->data_type == OSSL_PARAM_UTF8_STRING) {
+        if (*((int *)data) > 0)
+            BIO_printf(bio_out, ":");
+        BIO_printf(bio_out, "%s", (char *)(p->data));
+        /* mark presence of a provider-based sigalg */
+        *((int *)data) = 2;
+    }
+    /* As built-in providers don't have this capability, never error */
+    return 1;
+}
+
+static int list_tls_sigalg_caps(OSSL_PROVIDER *provider, void *cbdata)
+{
+    OSSL_PROVIDER_get_capabilities(provider, "TLS-SIGALG",
+                                   list_provider_tls_sigalgs,
+                                   cbdata);
+    /* As built-in providers don't have this capability, never error */
+    return 1;
+}
+
+static void list_tls_signatures(void)
+{
+    int tls_sigalg_listed = 0;
+    char *builtin_sigalgs = SSL_get1_builtin_sigalgs(app_get0_libctx());
+
+    if (builtin_sigalgs != NULL) {
+        if (builtin_sigalgs[0] != 0) {
+            BIO_printf(bio_out, "%s", builtin_sigalgs);
+            tls_sigalg_listed = 1;
+        }
+        OPENSSL_free(builtin_sigalgs);
+    }
+
+    if (!OSSL_PROVIDER_do_all(NULL, list_tls_sigalg_caps, &tls_sigalg_listed))
+        BIO_printf(bio_err,
+                   "ERROR: could not list all provider signature algorithms\n");
+    if (tls_sigalg_listed < 2)
+        BIO_printf(bio_out,
+                   "\nNo TLS sig algs registered by currently active providers");
+    BIO_printf(bio_out, "\n");
+}
+
 DEFINE_STACK_OF(EVP_KEM)
 static int kem_cmp(const EVP_KEM * const *a,
                    const EVP_KEM * const *b)
@@ -1210,8 +1261,11 @@ static int collect_providers(OSSL_PROVIDER *provider, void *stack)
 {
     STACK_OF(OSSL_PROVIDER) *provider_stack = stack;
 
-    sk_OSSL_PROVIDER_push(provider_stack, provider);
-    return 1;
+    /*
+     * If OK - result is the index of inserted data
+     * Error - result is -1 or 0
+     */
+    return sk_OSSL_PROVIDER_push(provider_stack, provider) > 0 ? 1 : 0;
 }
 
 static void list_provider_info(void)
@@ -1226,11 +1280,20 @@ static void list_provider_info(void)
         BIO_printf(bio_err, "ERROR: Memory allocation\n");
         return;
     }
+
+    if (OSSL_PROVIDER_do_all(NULL, &collect_providers, providers) != 1) {
+        sk_OSSL_PROVIDER_free(providers);
+        BIO_printf(bio_err, "ERROR: Memory allocation\n");
+        return;
+    }
+
     BIO_printf(bio_out, "Providers:\n");
-    OSSL_PROVIDER_do_all(NULL, &collect_providers, providers);
     sk_OSSL_PROVIDER_sort(providers);
     for (i = 0; i < sk_OSSL_PROVIDER_num(providers); i++) {
         const OSSL_PROVIDER *prov = sk_OSSL_PROVIDER_value(providers, i);
+        const char *provname = OSSL_PROVIDER_get0_name(prov);
+
+        BIO_printf(bio_out, "  %s\n", provname);
 
         /* Query the "known" information parameters, the order matches below */
         params[0] = OSSL_PARAM_construct_utf8_ptr(OSSL_PROV_PARAM_NAME,
@@ -1243,23 +1306,23 @@ static void list_provider_info(void)
         params[4] = OSSL_PARAM_construct_end();
         OSSL_PARAM_set_all_unmodified(params);
         if (!OSSL_PROVIDER_get_params(prov, params)) {
-            BIO_printf(bio_err, "ERROR: Unable to query provider parameters\n");
-            return;
-        }
-
-        /* Print out the provider information, the params order matches above */
-        BIO_printf(bio_out, "  %s\n", OSSL_PROVIDER_get0_name(prov));
-        if (OSSL_PARAM_modified(params))
-            BIO_printf(bio_out, "    name: %s\n", name);
-        if (OSSL_PARAM_modified(params + 1))
-            BIO_printf(bio_out, "    version: %s\n", version);
-        if (OSSL_PARAM_modified(params + 2))
-            BIO_printf(bio_out, "    status: %sactive\n", status ? "" : "in");
-        if (verbose) {
-            if (OSSL_PARAM_modified(params + 3))
-                BIO_printf(bio_out, "    build info: %s\n", buildinfo);
-            print_param_types("gettable provider parameters",
-                              OSSL_PROVIDER_gettable_params(prov), 4);
+            BIO_printf(bio_err,
+                       "WARNING: Unable to query provider parameters for %s\n",
+                       provname);
+        } else {
+            /* Print out the provider information, the params order matches above */
+            if (OSSL_PARAM_modified(params))
+                BIO_printf(bio_out, "    name: %s\n", name);
+            if (OSSL_PARAM_modified(params + 1))
+                BIO_printf(bio_out, "    version: %s\n", version);
+            if (OSSL_PARAM_modified(params + 2))
+                BIO_printf(bio_out, "    status: %sactive\n", status ? "" : "in");
+            if (verbose) {
+                if (OSSL_PARAM_modified(params + 3))
+                    BIO_printf(bio_out, "    build info: %s\n", buildinfo);
+                print_param_types("gettable provider parameters",
+                                  OSSL_PROVIDER_gettable_params(prov), 4);
+            }
         }
     }
     sk_OSSL_PROVIDER_free(providers);
@@ -1286,6 +1349,9 @@ static void list_engines(void)
 static void list_disabled(void)
 {
     BIO_puts(bio_out, "Disabled algorithms:\n");
+#ifdef OPENSSL_NO_ARGON2
+    BIO_puts(bio_out, "ARGON2\n");
+#endif
 #ifdef OPENSSL_NO_ARIA
     BIO_puts(bio_out, "ARIA\n");
 #endif
@@ -1333,6 +1399,9 @@ static void list_disabled(void)
 #endif
 #ifdef OPENSSL_NO_EC
     BIO_puts(bio_out, "EC\n");
+#endif
+#ifdef OPENSSL_NO_ECX
+    BIO_puts(bio_out, "ECX\n");
 #endif
 #ifdef OPENSSL_NO_EC2M
     BIO_puts(bio_out, "EC2M\n");
@@ -1442,11 +1511,12 @@ typedef enum HELPLIST_CHOICE {
     OPT_PK_ALGORITHMS, OPT_PK_METHOD, OPT_DISABLED,
     OPT_KDF_ALGORITHMS, OPT_RANDOM_INSTANCES, OPT_RANDOM_GENERATORS,
     OPT_ENCODERS, OPT_DECODERS, OPT_KEYMANAGERS, OPT_KEYEXCHANGE_ALGORITHMS,
-    OPT_KEM_ALGORITHMS, OPT_SIGNATURE_ALGORITHMS, OPT_ASYM_CIPHER_ALGORITHMS,
-    OPT_STORE_LOADERS, OPT_PROVIDER_INFO,
-    OPT_OBJECTS, OPT_SELECT_NAME,
+    OPT_KEM_ALGORITHMS, OPT_SIGNATURE_ALGORITHMS,
+    OPT_TLS_SIGNATURE_ALGORITHMS, OPT_ASYM_CIPHER_ALGORITHMS,
+    OPT_STORE_LOADERS, OPT_PROVIDER_INFO, OPT_OBJECTS,
+    OPT_SELECT_NAME,
 #ifndef OPENSSL_NO_DEPRECATED_3_0
-    OPT_ENGINES, 
+    OPT_ENGINES,
 #endif
     OPT_PROV_ENUM
 } HELPLIST_CHOICE;
@@ -1478,8 +1548,8 @@ const OPTIONS list_options[] = {
     {"mac-algorithms", OPT_MAC_ALGORITHMS, '-',
      "List of message authentication code algorithms"},
 #ifndef OPENSSL_NO_DEPRECATED_3_0
-    {"cipher-commands", OPT_CIPHER_COMMANDS, '-', 
-    "List of cipher commands (deprecated)"},
+    {"cipher-commands", OPT_CIPHER_COMMANDS, '-',
+     "List of cipher commands (deprecated)"},
 #endif
     {"cipher-algorithms", OPT_CIPHER_ALGORITHMS, '-',
      "List of symmetric cipher algorithms"},
@@ -1492,6 +1562,8 @@ const OPTIONS list_options[] = {
      "List of key encapsulation mechanism algorithms" },
     {"signature-algorithms", OPT_SIGNATURE_ALGORITHMS, '-',
      "List of signature algorithms" },
+    {"tls-signature-algorithms", OPT_TLS_SIGNATURE_ALGORITHMS, '-',
+     "List of TLS signature algorithms" },
     {"asymcipher-algorithms", OPT_ASYM_CIPHER_ALGORITHMS, '-',
       "List of asymmetric cipher algorithms" },
     {"public-key-algorithms", OPT_PK_ALGORITHMS, '-',
@@ -1537,6 +1609,7 @@ int list_main(int argc, char **argv)
         unsigned int decoder_algorithms:1;
         unsigned int keymanager_algorithms:1;
         unsigned int signature_algorithms:1;
+        unsigned int tls_signature_algorithms:1;
         unsigned int keyexchange_algorithms:1;
         unsigned int kem_algorithms:1;
         unsigned int asym_cipher_algorithms:1;
@@ -1610,6 +1683,9 @@ opthelp:
         case OPT_SIGNATURE_ALGORITHMS:
             todo.signature_algorithms = 1;
             break;
+        case OPT_TLS_SIGNATURE_ALGORITHMS:
+            todo.tls_signature_algorithms = 1;
+            break;
         case OPT_KEYEXCHANGE_ALGORITHMS:
             todo.keyexchange_algorithms = 1;
             break;
@@ -1669,7 +1745,7 @@ opthelp:
             BIO_printf(bio_out, "\n"); \
         } \
         cmd; \
-    } while(0)
+    } while (0)
 
     if (todo.commands)
         MAYBE_ADD_NL(list_type(FT_general, one));
@@ -1727,6 +1803,8 @@ opthelp:
         MAYBE_ADD_NL(list_keymanagers());
     if (todo.signature_algorithms)
         MAYBE_ADD_NL(list_signatures());
+    if (todo.tls_signature_algorithms)
+        MAYBE_ADD_NL(list_tls_signatures());
     if (todo.asym_cipher_algorithms)
         MAYBE_ADD_NL(list_asymciphers());
     if (todo.keyexchange_algorithms)

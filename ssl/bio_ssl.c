@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -25,7 +25,11 @@ static int ssl_free(BIO *data);
 static long ssl_callback_ctrl(BIO *h, int cmd, BIO_info_cb *fp);
 typedef struct bio_ssl_st {
     SSL *ssl;                   /* The ssl handle :-) */
-    /* re-negotiate every time the total number of bytes is this size */
+    /*
+     * Re-negotiate every time the total number of bytes is this size
+     * or when timeout expires.
+     * There is no proper support for TLS-1.3 or QUIC yet.
+     */
     int num_renegotiates;
     unsigned long renegotiate_count;
     size_t byte_count;
@@ -75,7 +79,7 @@ static int ssl_free(BIO *a)
         return 0;
     bs = BIO_get_data(a);
     if (BIO_get_shutdown(a)) {
-        if (bs->ssl != NULL)
+        if (bs->ssl != NULL && !SSL_in_init(bs->ssl))
             SSL_shutdown(bs->ssl);
         if (BIO_get_init(a))
             SSL_free(bs->ssl);
@@ -170,7 +174,7 @@ static int ssl_write(BIO *b, const char *buf, size_t size, size_t *written)
 
     BIO_clear_retry_flags(b);
 
-    ret = ssl_write_internal(ssl, buf, size, written);
+    ret = ssl_write_internal(ssl, buf, size, 0, written);
 
     switch (SSL_get_error(ssl, ret)) {
     case SSL_ERROR_NONE:
@@ -230,13 +234,14 @@ static long ssl_ctrl(BIO *b, int cmd, long num, void *ptr)
     bs = BIO_get_data(b);
     next = BIO_next(b);
     ssl = bs->ssl;
-    if ((ssl == NULL
-         || (sc = SSL_CONNECTION_FROM_SSL(ssl)) == NULL)
-        && cmd != BIO_C_SET_SSL)
+    if (ssl == NULL && cmd != BIO_C_SET_SSL)
         return 0;
-    /* TODO(QUIC): The rbio/wbio might be from QUIC_CONNECTION instead */
     switch (cmd) {
     case BIO_CTRL_RESET:
+        /* TODO(QUIC FUTURE): Add support when SSL_clear() is supported */
+        if ((sc = SSL_CONNECTION_FROM_SSL_ONLY(ssl)) == NULL)
+            return 0;
+
         SSL_shutdown(ssl);
 
         if (sc->handshake_func == ssl->method->ssl_connect)
@@ -313,20 +318,20 @@ static long ssl_ctrl(BIO *b, int cmd, long num, void *ptr)
         BIO_set_shutdown(b, (int)num);
         break;
     case BIO_CTRL_WPENDING:
-        ret = BIO_ctrl(sc->wbio, cmd, num, ptr);
+        ret = BIO_ctrl(SSL_get_wbio(ssl), cmd, num, ptr);
         break;
     case BIO_CTRL_PENDING:
         ret = SSL_pending(ssl);
         if (ret == 0)
-            ret = BIO_pending(sc->rbio);
+            ret = BIO_pending(SSL_get_rbio(ssl));
         break;
     case BIO_CTRL_FLUSH:
         BIO_clear_retry_flags(b);
-        ret = BIO_ctrl(sc->wbio, cmd, num, ptr);
+        ret = BIO_ctrl(SSL_get_wbio(ssl), cmd, num, ptr);
         BIO_copy_next_retry(b);
         break;
     case BIO_CTRL_PUSH:
-        if ((next != NULL) && (next != sc->rbio)) {
+        if ((next != NULL) && (next != SSL_get_rbio(ssl))) {
             /*
              * We are going to pass ownership of next to the SSL object...but
              * we don't own a reference to pass yet - so up ref
@@ -380,13 +385,21 @@ static long ssl_ctrl(BIO *b, int cmd, long num, void *ptr)
         ret = (dbs->ssl != NULL);
         break;
     case BIO_C_GET_FD:
-        ret = BIO_ctrl(sc->rbio, cmd, num, ptr);
+        ret = BIO_ctrl(SSL_get_rbio(ssl), cmd, num, ptr);
         break;
     case BIO_CTRL_SET_CALLBACK:
         ret = 0; /* use callback ctrl */
         break;
+    case BIO_CTRL_GET_RPOLL_DESCRIPTOR:
+        if (!SSL_get_rpoll_descriptor(ssl, (BIO_POLL_DESCRIPTOR *)ptr))
+            ret = 0;
+        break;
+    case BIO_CTRL_GET_WPOLL_DESCRIPTOR:
+        if (!SSL_get_wpoll_descriptor(ssl, (BIO_POLL_DESCRIPTOR *)ptr))
+            ret = 0;
+        break;
     default:
-        ret = BIO_ctrl(sc->rbio, cmd, num, ptr);
+        ret = BIO_ctrl(SSL_get_rbio(ssl), cmd, num, ptr);
         break;
     }
     return ret;
@@ -425,6 +438,12 @@ BIO *BIO_new_buffer_ssl_connect(SSL_CTX *ctx)
 #ifndef OPENSSL_NO_SOCK
     BIO *ret = NULL, *buf = NULL, *ssl = NULL;
 
+# ifndef OPENSSL_NO_QUIC
+    if (ctx != NULL && IS_QUIC_CTX(ctx))
+        /* Never use buffering for QUIC. */
+        return BIO_new_ssl_connect(ctx);
+# endif
+
     if ((buf = BIO_new(BIO_f_buffer())) == NULL)
         return NULL;
     if ((ssl = BIO_new_ssl_connect(ctx)) == NULL)
@@ -446,6 +465,13 @@ BIO *BIO_new_ssl_connect(SSL_CTX *ctx)
 
     if ((con = BIO_new(BIO_s_connect())) == NULL)
         return NULL;
+
+# ifndef OPENSSL_NO_QUIC
+    if (ctx != NULL && IS_QUIC_CTX(ctx))
+        if (!BIO_set_sock_type(con, SOCK_DGRAM))
+            goto err;
+#endif
+
     if ((ssl = BIO_new_ssl(ctx, 1)) == NULL)
         goto err;
     if ((ret = BIO_push(ssl, con)) == NULL)

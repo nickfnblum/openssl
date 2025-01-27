@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -30,6 +30,10 @@
 #define SIZE    (512)
 #define BSIZE   (8*1024)
 
+#define PBKDF2_ITER_DEFAULT     10000
+#define STR(a) XSTR(a)
+#define XSTR(a) #a
+
 static int set_hex(const char *in, unsigned char *out, int size);
 static void show_ciphers(const OBJ_NAME *name, void *bio_);
 
@@ -45,7 +49,7 @@ typedef enum OPTION_choice {
     OPT_NOPAD, OPT_SALT, OPT_NOSALT, OPT_DEBUG, OPT_UPPER_P, OPT_UPPER_A,
     OPT_A, OPT_Z, OPT_BUFSIZE, OPT_K, OPT_KFILE, OPT_UPPER_K, OPT_NONE,
     OPT_UPPER_S, OPT_IV, OPT_MD, OPT_ITER, OPT_PBKDF2, OPT_CIPHER,
-    OPT_R_ENUM, OPT_PROV_ENUM
+    OPT_SALTLEN, OPT_R_ENUM, OPT_PROV_ENUM
 } OPTION_CHOICE;
 
 const OPTIONS enc_options[] = {
@@ -88,9 +92,16 @@ const OPTIONS enc_options[] = {
     {"S", OPT_UPPER_S, 's', "Salt, in hex"},
     {"iv", OPT_IV, 's', "IV in hex"},
     {"md", OPT_MD, 's', "Use specified digest to create a key from the passphrase"},
-    {"iter", OPT_ITER, 'p', "Specify the iteration count and force use of PBKDF2"},
-    {"pbkdf2", OPT_PBKDF2, '-', "Use password-based key derivation function 2"},
+    {"iter", OPT_ITER, 'p',
+     "Specify the iteration count and force the use of PBKDF2"},
+    {OPT_MORE_STR, 0, 0, "Default: " STR(PBKDF2_ITER_DEFAULT)},
+    {"pbkdf2", OPT_PBKDF2, '-',
+     "Use password-based key derivation function 2 (PBKDF2)"},
+    {OPT_MORE_STR, 0, 0,
+     "Use -iter to change the iteration count from " STR(PBKDF2_ITER_DEFAULT)},
     {"none", OPT_NONE, '-', "Don't encrypt"},
+    {"saltlen", OPT_SALTLEN, 'p', "Specify the PBKDF2 salt length (in bytes)"},
+    {OPT_MORE_STR, 0, 0, "Default: 16"},
 #ifndef OPENSSL_NO_ZLIB
     {"z", OPT_Z, '-', "Compress or decompress encrypted data using zlib"},
 #endif
@@ -123,7 +134,8 @@ int enc_main(int argc, char **argv)
     int base64 = 0, informat = FORMAT_BINARY, outformat = FORMAT_BINARY;
     int ret = 1, inl, nopad = 0;
     unsigned char key[EVP_MAX_KEY_LENGTH], iv[EVP_MAX_IV_LENGTH];
-    unsigned char *buff = NULL, salt[PKCS5_SALT_LEN];
+    unsigned char *buff = NULL, salt[EVP_MAX_IV_LENGTH];
+    int saltlen = 0;
     int pbkdf2 = 0;
     int iter = 0;
     long n;
@@ -284,10 +296,16 @@ int enc_main(int argc, char **argv)
             iter = opt_int_arg();
             pbkdf2 = 1;
             break;
+        case OPT_SALTLEN:
+            if (!opt_int(opt_arg(), &saltlen))
+                goto opthelp;
+            if (saltlen > (int)sizeof(salt))
+                saltlen = (int)sizeof(salt);
+            break;
         case OPT_PBKDF2:
             pbkdf2 = 1;
             if (iter == 0)    /* do not overwrite a chosen value */
-                iter = 10000;
+                iter = PBKDF2_ITER_DEFAULT;
             break;
         case OPT_NONE:
             cipher = NULL;
@@ -308,6 +326,8 @@ int enc_main(int argc, char **argv)
         goto opthelp;
     if (!app_RAND_load())
         goto end;
+    if (saltlen == 0 || pbkdf2 == 0)
+        saltlen = PKCS5_SALT_LEN;
 
     /* Get the cipher name, either from progname (if set) or flag. */
     if (!opt_cipher(ciphername, &cipher))
@@ -487,13 +507,13 @@ int enc_main(int argc, char **argv)
             if (nosalt) {
                 sptr = NULL;
             } else {
-                if (hsalt != NULL && !set_hex(hsalt, salt, sizeof(salt))) {
+                if (hsalt != NULL && !set_hex(hsalt, salt, saltlen)) {
                     BIO_printf(bio_err, "invalid hex salt value\n");
                     goto end;
                 }
                 if (enc) {  /* encryption */
                     if (hsalt == NULL) {
-                        if (RAND_bytes(salt, sizeof(salt)) <= 0) {
+                        if (RAND_bytes(salt, saltlen) <= 0) {
                             BIO_printf(bio_err, "RAND_bytes failed\n");
                             goto end;
                         }
@@ -506,7 +526,7 @@ int enc_main(int argc, char **argv)
                                           sizeof(magic) - 1) != sizeof(magic) - 1
                                 || BIO_write(wbio,
                                              (char *)salt,
-                                             sizeof(salt)) != sizeof(salt))) {
+                                             saltlen) != saltlen)) {
                             BIO_printf(bio_err, "error writing output file\n");
                             goto end;
                         }
@@ -519,7 +539,7 @@ int enc_main(int argc, char **argv)
                         }
                         if (memcmp(mbuf, magic, sizeof(mbuf)) == 0) { /* file IS salted */
                             if (BIO_read(rbio, salt,
-                                         sizeof(salt)) != sizeof(salt)) {
+                                         saltlen) != saltlen) {
                                 BIO_printf(bio_err, "error reading input file\n");
                                 goto end;
                             }
@@ -541,7 +561,8 @@ int enc_main(int argc, char **argv)
                 int iklen = EVP_CIPHER_get_key_length(cipher);
                 int ivlen = EVP_CIPHER_get_iv_length(cipher);
                 /* not needed if HASH_UPDATE() is fixed : */
-                int islen = (sptr != NULL ? sizeof(salt) : 0);
+                int islen = (sptr != NULL ? saltlen : 0);
+
                 if (!PKCS5_PBKDF2_HMAC(str, str_len, sptr, islen,
                                        iter, dgst, iklen+ivlen, tmpkeyiv)) {
                     BIO_printf(bio_err, "PKCS5_PBKDF2_HMAC failed\n");
@@ -572,6 +593,7 @@ int enc_main(int argc, char **argv)
         }
         if (hiv != NULL) {
             int siz = EVP_CIPHER_get_iv_length(cipher);
+
             if (siz == 0) {
                 BIO_printf(bio_err, "warning: iv not used by this cipher\n");
             } else if (!set_hex(hiv, iv, siz)) {
@@ -637,7 +659,7 @@ int enc_main(int argc, char **argv)
         if (printkey) {
             if (!nosalt) {
                 printf("salt=");
-                for (i = 0; i < (int)sizeof(salt); i++)
+                for (i = 0; i < (int)saltlen; i++)
                     printf("%02X", salt[i]);
                 printf("\n");
             }
@@ -680,7 +702,10 @@ int enc_main(int argc, char **argv)
             break;
     }
     if (!BIO_flush(wbio)) {
-        BIO_printf(bio_err, "bad decrypt\n");
+        if (enc)
+            BIO_printf(bio_err, "bad encrypt\n");
+        else
+            BIO_printf(bio_err, "bad decrypt\n");
         goto end;
     }
 

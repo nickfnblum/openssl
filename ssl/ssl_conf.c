@@ -1,11 +1,13 @@
 /*
- * Copyright 2012-2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2012-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
  * in the file LICENSE in the source distribution or at
  * https://www.openssl.org/source/license.html
  */
+
+#include "internal/e_os.h"
 
 #include <stdio.h>
 #include "ssl_local.h"
@@ -241,7 +243,7 @@ static int cmd_ECDHParameters(SSL_CONF_CTX *cctx, const char *value)
         return 1;
 
     /* ECDHParameters accepts a single group name */
-    if (strstr(value, ":") != NULL)
+    if (strchr(value, ':') != NULL)
         return 0;
 
     if (cctx->ctx)
@@ -337,7 +339,7 @@ static int min_max_proto(SSL_CONF_CTX *cctx, const char *value, int *bound)
     if (cctx->ctx != NULL)
         method_version = cctx->ctx->method->version;
     else if (cctx->ssl != NULL)
-        method_version = cctx->ssl->ctx->method->version;
+        method_version = cctx->ssl->defltmeth->version;
     else
         return 0;
     if ((new_version = protocol_from_string(value)) < 0)
@@ -391,6 +393,7 @@ static int cmd_Options(SSL_CONF_CTX *cctx, const char *value)
         SSL_FLAG_TBL_INV("EncryptThenMac", SSL_OP_NO_ENCRYPT_THEN_MAC),
         SSL_FLAG_TBL("NoRenegotiation", SSL_OP_NO_RENEGOTIATION),
         SSL_FLAG_TBL("AllowNoDHEKEX", SSL_OP_ALLOW_NO_DHE_KEX),
+        SSL_FLAG_TBL("PreferNoDHEKEX", SSL_OP_PREFER_NO_DHE_KEX),
         SSL_FLAG_TBL("PrioritizeChaCha", SSL_OP_PRIORITIZE_CHACHA),
         SSL_FLAG_TBL("MiddleboxCompat", SSL_OP_ENABLE_MIDDLEBOX_COMPAT),
         SSL_FLAG_TBL_INV("AntiReplay", SSL_OP_NO_ANTI_REPLAY),
@@ -401,6 +404,7 @@ static int cmd_Options(SSL_CONF_CTX *cctx, const char *value)
         SSL_FLAG_TBL_INV("TxCertificateCompression", SSL_OP_NO_TX_CERTIFICATE_COMPRESSION),
         SSL_FLAG_TBL_INV("RxCertificateCompression", SSL_OP_NO_RX_CERTIFICATE_COMPRESSION),
         SSL_FLAG_TBL("KTLSTxZerocopySendfile", SSL_OP_ENABLE_KTLS_TX_ZEROCOPY_SENDFILE),
+        SSL_FLAG_TBL("IgnoreUnexpectedEOF", SSL_OP_IGNORE_UNEXPECTED_EOF),
     };
     if (value == NULL)
         return -3;
@@ -647,21 +651,47 @@ static int cmd_DHParameters(SSL_CONF_CTX *cctx, const char *value)
     return rv > 0;
 }
 
+/*
+ * |value| input is "<number[,number]>"
+ * where the first number is the padding block size for
+ * application data, and the optional second is the
+ * padding block size for handshake messages
+ */
 static int cmd_RecordPadding(SSL_CONF_CTX *cctx, const char *value)
 {
     int rv = 0;
-    int block_size = atoi(value);
+    unsigned long block_padding = 0, hs_padding = 0;
+    char *commap = NULL, *copy = NULL;
+    char *endptr = NULL;
+
+    copy = OPENSSL_strdup(value);
+    if (copy == NULL)
+        goto out;
+    commap = strstr(copy, ",");
+    if (commap != NULL) {
+        *commap = '\0';
+        if (*(commap + 1) == '\0')
+            goto out;
+        if (!OPENSSL_strtoul(commap + 1, &endptr, 0, &hs_padding))
+            goto out;
+    }
+    if (!OPENSSL_strtoul(copy, &endptr, 0, &block_padding))
+        goto out;
+    if (commap == NULL)
+        hs_padding = block_padding;
 
     /*
-     * All we care about is a non-negative value,
+     * All we care about are non-negative values,
      * the setters check the range
      */
-    if (block_size >= 0) {
-        if (cctx->ctx)
-            rv = SSL_CTX_set_block_padding(cctx->ctx, block_size);
-        if (cctx->ssl)
-            rv = SSL_set_block_padding(cctx->ssl, block_size);
-    }
+    if (cctx->ctx)
+        rv = SSL_CTX_set_block_padding_ex(cctx->ctx, (size_t)block_padding,
+                                          (size_t)hs_padding);
+    if (cctx->ssl)
+        rv = SSL_set_block_padding_ex(cctx->ssl, (size_t)block_padding,
+                                      (size_t)hs_padding);
+out:
+    OPENSSL_free(copy);
     return rv;
 }
 
@@ -724,6 +754,7 @@ static const ssl_conf_cmd_tbl ssl_conf_cmds[] = {
     SSL_CONF_CMD_SWITCH("no_resumption_on_reneg", SSL_CONF_FLAG_SERVER),
     SSL_CONF_CMD_SWITCH("no_legacy_server_connect", SSL_CONF_FLAG_CLIENT),
     SSL_CONF_CMD_SWITCH("allow_no_dhe_kex", 0),
+    SSL_CONF_CMD_SWITCH("prefer_no_dhe_kex", 0),
     SSL_CONF_CMD_SWITCH("prioritize_chacha", SSL_CONF_FLAG_SERVER),
     SSL_CONF_CMD_SWITCH("strict", 0),
     SSL_CONF_CMD_SWITCH("no_middlebox", 0),
@@ -815,6 +846,8 @@ static const ssl_switch_tbl ssl_cmd_switches[] = {
     {SSL_OP_LEGACY_SERVER_CONNECT, SSL_TFLAG_INV},
     /* allow_no_dhe_kex */
     {SSL_OP_ALLOW_NO_DHE_KEX, 0},
+    /* prefer_no_dhe_kex */
+    {SSL_OP_PREFER_NO_DHE_KEX, 0},
     /* chacha reprioritization */
     {SSL_OP_PRIORITIZE_CHACHA, 0},
     {SSL_CERT_FLAG_TLS_STRICT, SSL_TFLAG_CERT}, /* strict */
@@ -854,7 +887,7 @@ static int ssl_conf_cmd_skip_prefix(SSL_CONF_CTX *cctx, const char **pcmd)
 }
 
 /* Determine if a command is allowed according to cctx flags */
-static int ssl_conf_cmd_allowed(SSL_CONF_CTX *cctx, const ssl_conf_cmd_tbl * t)
+static int ssl_conf_cmd_allowed(SSL_CONF_CTX *cctx, const ssl_conf_cmd_tbl *t)
 {
     unsigned int tfl = t->flags;
     unsigned int cfl = cctx->flags;
@@ -892,14 +925,17 @@ static const ssl_conf_cmd_tbl *ssl_conf_cmd_lookup(SSL_CONF_CTX *cctx,
     return NULL;
 }
 
-static int ctrl_switch_option(SSL_CONF_CTX *cctx, const ssl_conf_cmd_tbl * cmd)
+static int ctrl_switch_option(SSL_CONF_CTX *cctx, const ssl_conf_cmd_tbl *cmd)
 {
     /* Find index of command in table */
     size_t idx = cmd - ssl_conf_cmds;
     const ssl_switch_tbl *scmd;
+
     /* Sanity check index */
-    if (idx >= OSSL_NELEM(ssl_cmd_switches))
+    if (idx >= OSSL_NELEM(ssl_cmd_switches)) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return 0;
+    }
     /* Obtain switches entry with same index */
     scmd = ssl_cmd_switches + idx;
     ssl_set_option(cctx, scmd->name_flags, scmd->option_value, 1);
@@ -915,28 +951,33 @@ int SSL_CONF_cmd(SSL_CONF_CTX *cctx, const char *cmd, const char *value)
     }
 
     if (!ssl_conf_cmd_skip_prefix(cctx, &cmd))
-        return -2;
+        goto unknown_cmd;
 
     runcmd = ssl_conf_cmd_lookup(cctx, cmd);
 
     if (runcmd) {
-        int rv;
+        int rv = -3;
+
         if (runcmd->value_type == SSL_CONF_TYPE_NONE) {
             return ctrl_switch_option(cctx, runcmd);
         }
         if (value == NULL)
-            return -3;
+            goto bad_value;
         rv = runcmd->cmd(cctx, value);
         if (rv > 0)
             return 2;
-        if (rv == -2)
-            return -2;
+        if (rv != -2)
+            rv = 0;
+
+ bad_value:
         if (cctx->flags & SSL_CONF_FLAG_SHOW_ERRORS)
             ERR_raise_data(ERR_LIB_SSL, SSL_R_BAD_VALUE,
-                           "cmd=%s, value=%s", cmd, value);
-        return 0;
+                           "cmd=%s, value=%s", cmd,
+                           value != NULL ? value : "<EMPTY>");
+        return rv;
     }
 
+ unknown_cmd:
     if (cctx->flags & SSL_CONF_FLAG_SHOW_ERRORS)
         ERR_raise_data(ERR_LIB_SSL, SSL_R_UNKNOWN_CMD_NAME, "cmd=%s", cmd);
 

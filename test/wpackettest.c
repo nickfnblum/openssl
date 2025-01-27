@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2016-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -10,7 +10,7 @@
 #include <string.h>
 #include <openssl/buffer.h>
 #include <openssl/rand.h>
-#include "internal/packet.h"
+#include "internal/packet_quic.h"
 #include "testutil.h"
 
 static const unsigned char simple1[] = { 0xff };
@@ -25,6 +25,8 @@ static const unsigned char fixed[] = { 0xff, 0xff, 0xff };
 static const unsigned char simpleder[] = {
     0xfc, 0x04, 0x00, 0x01, 0x02, 0x03, 0xff, 0xfe, 0xfd
 };
+
+#ifndef OPENSSL_NO_QUIC
 
 /* QUIC sub-packet with 4-byte length prefix, containing a 1-byte vlint */
 static const unsigned char quic1[] = { 0x80, 0x00, 0x00, 0x01, 0x09 };
@@ -49,6 +51,8 @@ static const unsigned char quic7[] = {
     0x07, 0x80, 0x00, 0x00, 0x08, 0x65, 0x14, 0x40, 0x01, 0x05,
     0x40, 0x01, 0x11, 0x40, 0x01, 0x12, 0x40, 0x01, 0x13
 };
+
+#endif
 
 static BUF_MEM *buf;
 
@@ -422,7 +426,7 @@ static int test_WPACKET_init_der(void)
         if (i == 0) {
             if (!TEST_true(WPACKET_init_null_der(&pkt)))
                 return 0;
-        } else { 
+        } else {
             if (!TEST_true(WPACKET_init_der(&pkt, sbuf, sizeof(sbuf))))
                 return 0;
         }
@@ -447,6 +451,8 @@ static int test_WPACKET_init_der(void)
 
     return 1;
 }
+
+#ifndef OPENSSL_NO_QUIC
 
 static int test_WPACKET_quic(void)
 {
@@ -584,7 +590,7 @@ static int test_WPACKET_quic_vlint_random(void)
         if (!TEST_int_gt(RAND_bytes(rand_data, sizeof(rand_data)), 0))
             return cleanup(&pkt);
 
-        expected = *(uint64_t*)rand_data;
+        memcpy(&expected, rand_data, sizeof(uint64_t));
 
         /*
          * Ensure that all size classes get tested with equal probability.
@@ -621,6 +627,8 @@ static int test_WPACKET_quic_vlint_random(void)
     return 1;
 }
 
+#endif
+
 int setup_tests(void)
 {
     if (!TEST_ptr(buf = BUF_MEM_new()))
@@ -633,8 +641,10 @@ int setup_tests(void)
     ADD_TEST(test_WPACKET_allocate_bytes);
     ADD_TEST(test_WPACKET_memcpy);
     ADD_TEST(test_WPACKET_init_der);
+#ifndef OPENSSL_NO_QUIC
     ADD_TEST(test_WPACKET_quic);
     ADD_TEST(test_WPACKET_quic_vlint_random);
+#endif
     return 1;
 }
 

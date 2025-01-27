@@ -1,5 +1,5 @@
 #! /usr/bin/env perl
-# Copyright 1999-2022 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 1999-2024 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -567,12 +567,11 @@ EOF
                 $rn =~ tr/_[A-Z]/ [a-z]/;
                 $strings{$i} = $rn;
             }
-            my $short = "    {ERR_PACK($pack_lib, 0, $i), \"$rn\"},";
-            if ( length($short) <= 80 ) {
-                print OUT "$short\n";
-            } else {
-                print OUT "    {ERR_PACK($pack_lib, 0, $i),\n    \"$rn\"},\n";
-            }
+            my $lines;
+            $lines = "    {ERR_PACK($pack_lib, 0, $i), \"$rn\"},";
+            $lines = "    {ERR_PACK($pack_lib, 0, $i),\n     \"$rn\"},"
+                if length($lines) > 80;
+            print OUT "$lines\n";
         }
         print OUT <<"EOF";
     {0, NULL}
@@ -690,7 +689,7 @@ EOF
         my $short = "$i:$rcodes{$i}:";
         my $t = exists $strings{$i} ? "$strings{$i}" : "";
         $t = "\\\n\t" . $t if length($short) + length($t) > 80;
-        print OUT "$short$t\n" if !exists $rextra{$i};
+        print OUT "$short$t\n";
     }
     close(OUT);
     if ( $skippedstate ) {

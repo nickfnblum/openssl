@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2022-2023 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -248,7 +248,7 @@ static int ecxkem_set_ctx_params(void *vctx, const OSSL_PARAM params[])
 
     if (ctx == NULL)
         return 0;
-    if (params == NULL)
+    if (ossl_param_is_empty(params))
         return 1;
 
     p = OSSL_PARAM_locate_const(params, OSSL_KEM_PARAM_IKME);
@@ -700,5 +700,5 @@ const OSSL_DISPATCH ossl_ecx_asym_kem_functions[] = {
       (void (*)(void))ecxkem_auth_encapsulate_init },
     { OSSL_FUNC_KEM_AUTH_DECAPSULATE_INIT,
       (void (*)(void))ecxkem_auth_decapsulate_init },
-    { 0, NULL }
+    OSSL_DISPATCH_END
 };

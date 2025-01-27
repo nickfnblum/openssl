@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2000-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -52,6 +52,7 @@ struct evp_cipher_ctx_st {
     int final_used;
     int block_mask;
     unsigned char final[EVP_MAX_BLOCK_LENGTH]; /* possible final block */
+    size_t numpipes;
 
     /*
      * Opaque ctx returned from a providers cipher algorithm implementation
@@ -95,11 +96,12 @@ struct evp_keymgmt_st {
     int id;                      /* libcrypto internal */
 
     int name_id;
+    /* NID for the legacy alg if there is one */
+    int legacy_alg;
     char *type_name;
     const char *description;
     OSSL_PROVIDER *prov;
     CRYPTO_REF_COUNT refcnt;
-    CRYPTO_RWLOCK *lock;
 
     /* Constructor(s), destructor, information */
     OSSL_FUNC_keymgmt_new_fn *new;
@@ -112,6 +114,8 @@ struct evp_keymgmt_st {
     /* Generation, a complex constructor */
     OSSL_FUNC_keymgmt_gen_init_fn *gen_init;
     OSSL_FUNC_keymgmt_gen_set_template_fn *gen_set_template;
+    OSSL_FUNC_keymgmt_gen_get_params_fn *gen_get_params;
+    OSSL_FUNC_keymgmt_gen_gettable_params_fn *gen_gettable_params;
     OSSL_FUNC_keymgmt_gen_set_params_fn *gen_set_params;
     OSSL_FUNC_keymgmt_gen_settable_params_fn *gen_settable_params;
     OSSL_FUNC_keymgmt_gen_fn *gen;
@@ -128,8 +132,10 @@ struct evp_keymgmt_st {
     /* Import and export routines */
     OSSL_FUNC_keymgmt_import_fn *import;
     OSSL_FUNC_keymgmt_import_types_fn *import_types;
+    OSSL_FUNC_keymgmt_import_types_ex_fn *import_types_ex;
     OSSL_FUNC_keymgmt_export_fn *export;
     OSSL_FUNC_keymgmt_export_types_fn *export_types;
+    OSSL_FUNC_keymgmt_export_types_ex_fn *export_types_ex;
     OSSL_FUNC_keymgmt_dup_fn *dup;
 } /* EVP_KEYMGMT */ ;
 
@@ -139,7 +145,6 @@ struct evp_keyexch_st {
     const char *description;
     OSSL_PROVIDER *prov;
     CRYPTO_REF_COUNT refcnt;
-    CRYPTO_RWLOCK *lock;
 
     OSSL_FUNC_keyexch_newctx_fn *newctx;
     OSSL_FUNC_keyexch_init_fn *init;
@@ -159,13 +164,18 @@ struct evp_signature_st {
     const char *description;
     OSSL_PROVIDER *prov;
     CRYPTO_REF_COUNT refcnt;
-    CRYPTO_RWLOCK *lock;
 
     OSSL_FUNC_signature_newctx_fn *newctx;
     OSSL_FUNC_signature_sign_init_fn *sign_init;
     OSSL_FUNC_signature_sign_fn *sign;
+    OSSL_FUNC_signature_sign_message_init_fn *sign_message_init;
+    OSSL_FUNC_signature_sign_message_update_fn *sign_message_update;
+    OSSL_FUNC_signature_sign_message_final_fn *sign_message_final;
     OSSL_FUNC_signature_verify_init_fn *verify_init;
     OSSL_FUNC_signature_verify_fn *verify;
+    OSSL_FUNC_signature_verify_message_init_fn *verify_message_init;
+    OSSL_FUNC_signature_verify_message_update_fn *verify_message_update;
+    OSSL_FUNC_signature_verify_message_final_fn *verify_message_final;
     OSSL_FUNC_signature_verify_recover_init_fn *verify_recover_init;
     OSSL_FUNC_signature_verify_recover_fn *verify_recover;
     OSSL_FUNC_signature_digest_sign_init_fn *digest_sign_init;
@@ -186,6 +196,9 @@ struct evp_signature_st {
     OSSL_FUNC_signature_gettable_ctx_md_params_fn *gettable_ctx_md_params;
     OSSL_FUNC_signature_set_ctx_md_params_fn *set_ctx_md_params;
     OSSL_FUNC_signature_settable_ctx_md_params_fn *settable_ctx_md_params;
+
+    /* Signature object checking */
+    OSSL_FUNC_signature_query_key_types_fn *query_key_types;
 } /* EVP_SIGNATURE */;
 
 struct evp_asym_cipher_st {
@@ -194,7 +207,6 @@ struct evp_asym_cipher_st {
     const char *description;
     OSSL_PROVIDER *prov;
     CRYPTO_REF_COUNT refcnt;
-    CRYPTO_RWLOCK *lock;
 
     OSSL_FUNC_asym_cipher_newctx_fn *newctx;
     OSSL_FUNC_asym_cipher_encrypt_init_fn *encrypt_init;
@@ -215,7 +227,6 @@ struct evp_kem_st {
     const char *description;
     OSSL_PROVIDER *prov;
     CRYPTO_REF_COUNT refcnt;
-    CRYPTO_RWLOCK *lock;
 
     OSSL_FUNC_kem_newctx_fn *newctx;
     OSSL_FUNC_kem_encapsulate_init_fn *encapsulate_init;

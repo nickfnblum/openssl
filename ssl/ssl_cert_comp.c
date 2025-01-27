@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2022-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -21,7 +21,7 @@ size_t ossl_calculate_comp_expansion(int alg, size_t length)
      * Brotli: per RFC7932: N + 5 + 3 * (N >> 16)
      * ZSTD: N + 4 + 14 + 3 * (N >> 17) + 4
      */
-    
+
     switch (alg) {
     case TLSEXT_comp_cert_zlib:
         ret = length + 11 + 5 * (length >> 14);
@@ -64,10 +64,9 @@ static OSSL_COMP_CERT *OSSL_COMP_CERT_new(unsigned char *data, size_t len, size_
     if (!ossl_comp_has_alg(alg)
             || data == NULL
             || (ret = OPENSSL_zalloc(sizeof(*ret))) == NULL
-            || (ret->lock = CRYPTO_THREAD_lock_new()) == NULL)
+            || !CRYPTO_NEW_REF(&ret->references, 1))
         goto err;
 
-    ret->references = 1;
     ret->data = data;
     ret->len = len;
     ret->orig_len = orig_len;
@@ -136,24 +135,24 @@ void OSSL_COMP_CERT_free(OSSL_COMP_CERT *cc)
     if (cc == NULL)
         return;
 
-    CRYPTO_DOWN_REF(&cc->references, &i, cc->lock);
-    REF_PRINT_COUNT("OSSL_COMP_CERT", cc);
+    CRYPTO_DOWN_REF(&cc->references, &i);
+    REF_PRINT_COUNT("OSSL_COMP_CERT", i, cc);
     if (i > 0)
         return;
     REF_ASSERT_ISNT(i < 0);
 
     OPENSSL_free(cc->data);
-    CRYPTO_THREAD_lock_free(cc->lock);
+    CRYPTO_FREE_REF(&cc->references);
     OPENSSL_free(cc);
 }
 int OSSL_COMP_CERT_up_ref(OSSL_COMP_CERT *cc)
 {
     int i;
 
-    if (CRYPTO_UP_REF(&cc->references, &i, cc->lock) <= 0)
+    if (CRYPTO_UP_REF(&cc->references, &i) <= 0)
         return 0;
 
-    REF_PRINT_COUNT("OSSL_COMP_CERT", cc);
+    REF_PRINT_COUNT("OSSL_COMP_CERT", i, cc);
     REF_ASSERT_ISNT(i < 2);
     return ((i > 1) ? 1 : 0);
 }

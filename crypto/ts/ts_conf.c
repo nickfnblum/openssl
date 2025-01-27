@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2006-2023 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -481,7 +481,7 @@ int TS_CONF_set_ess_cert_id_digest(CONF *conf, const char *section,
     const char *md = NCONF_get_string(conf, section, ENV_ESS_CERT_ID_ALG);
 
     if (md == NULL)
-        md = "sha1";
+        md = "sha256";
 
     cert_md = EVP_get_digestbyname(md);
     if (cert_md == NULL) {

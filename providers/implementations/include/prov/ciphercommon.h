@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2019-2023 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -69,6 +69,7 @@ struct prov_cipher_ctx_st {
     unsigned int pad : 1;    /* Whether padding should be used or not */
     unsigned int enc : 1;    /* Set to 1 for encrypt, or 0 otherwise */
     unsigned int iv_set : 1; /* Set when the iv is copied to the iv/oiv buffers */
+    unsigned int key_set : 1; /* Set when key is set on the context */
     unsigned int updated : 1; /* Set to 1 during update for one shot ciphers */
     unsigned int variable_keylength : 1;
     unsigned int inverse_cipher : 1; /* set to 1 to use inverse cipher */
@@ -154,7 +155,7 @@ const OSSL_DISPATCH ossl_##alg##kbits##lcmode##_functions[] = {                \
       (void (*)(void))ossl_cipher_generic_gettable_ctx_params },               \
     { OSSL_FUNC_CIPHER_SETTABLE_CTX_PARAMS,                                    \
      (void (*)(void))ossl_cipher_generic_settable_ctx_params },                \
-    { 0, NULL }                                                                \
+    OSSL_DISPATCH_END                                                          \
 };
 
 # define IMPLEMENT_var_keylen_cipher_func(alg, UCALG, lcmode, UCMODE, flags,    \
@@ -181,7 +182,7 @@ const OSSL_DISPATCH ossl_##alg##kbits##lcmode##_functions[] = {                \
       (void (*)(void))ossl_cipher_generic_gettable_ctx_params },               \
     { OSSL_FUNC_CIPHER_SETTABLE_CTX_PARAMS,                                    \
      (void (*)(void))ossl_cipher_var_keylen_settable_ctx_params },             \
-    { 0, NULL }                                                                \
+    OSSL_DISPATCH_END                                                          \
 };
 
 
