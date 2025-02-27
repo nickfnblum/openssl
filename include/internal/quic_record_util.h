@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2022-2023 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -12,6 +12,8 @@
 
 # include <openssl/ssl.h>
 # include "internal/quic_types.h"
+
+# ifndef OPENSSL_NO_QUIC
 
 struct ossl_qrx_st;
 struct ossl_qtx_st;
@@ -108,5 +110,7 @@ uint64_t ossl_qrl_get_suite_max_pkt(uint32_t suite_id);
  * for a given suite or 0 if suite ID is invalid.
  */
 uint64_t ossl_qrl_get_suite_max_forged_pkt(uint32_t suite_id);
+
+# endif
 
 #endif

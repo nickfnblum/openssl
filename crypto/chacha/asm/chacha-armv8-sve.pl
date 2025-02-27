@@ -1,5 +1,5 @@
 #! /usr/bin/env perl
-# Copyright 2022  The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2022-2023  The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -30,6 +30,7 @@ sub AUTOLOAD()		# thunk [simplified] x86-style perlasm
     $code .= "\t$opcode\t".join(',',@_,$arg)."\n";
 }
 
+$prefix="chacha_sve";
 my ($outp,$inp,$len,$key,$ctr) = map("x$_",(0..4));
 my ($veclen) = ("x5");
 my ($counter) = ("x6");
@@ -247,6 +248,9 @@ sub load_regs() {
 	my $next_offset = $offset + 1;
 $code.=<<___;
 	ld1w	{$reg.s},p0/z,[$inp,#$offset,MUL VL]
+#ifdef  __AARCH64EB__
+	revb    $reg.s,p0/m,$reg.s
+#endif
 ___
 	if (@_) {
 		&load_regs($next_offset, @_);
@@ -268,6 +272,9 @@ sub store_regs() {
 	my $reg = shift;
 	my $next_offset = $offset + 1;
 $code.=<<___;
+#ifdef  __AARCH64EB__
+	revb	$reg.s,p0/m,$reg.s
+#endif
 	st1w	{$reg.s},p0,[$outp,#$offset,MUL VL]
 ___
 	if (@_) {
@@ -472,14 +479,14 @@ ___
 sub SVE_TRANSFORMS() {
 $code.=<<___;
 #ifdef	__AARCH64EB__
-	rev	@x[0],@x[0]
-	rev	@x[2],@x[2]
-	rev	@x[4],@x[4]
-	rev	@x[6],@x[6]
-	rev	@x[8],@x[8]
-	rev	@x[10],@x[10]
-	rev	@x[12],@x[12]
-	rev	@x[14],@x[14]
+	rev	@sxx[0],@sxx[0]
+	rev	@sxx[2],@sxx[2]
+	rev	@sxx[4],@sxx[4]
+	rev	@sxx[6],@sxx[6]
+	rev	@sxx[8],@sxx[8]
+	rev	@sxx[10],@sxx[10]
+	rev	@sxx[12],@sxx[12]
+	rev	@sxx[14],@sxx[14]
 #endif
 	.if mixin == 1
 		add	@K[6],@K[6],#1
@@ -715,11 +722,19 @@ $code.=<<___;
 .hidden	OPENSSL_armcap_P
 
 .text
+
+.rodata
 .align	5
+.type _${prefix}_consts,%object
+_${prefix}_consts:
 .Lchacha20_consts:
 .quad	0x3320646e61707865,0x6b20657479622d32		// endian-neutral
 .Lrot8:
 	.word 0x02010003,0x04040404,0x02010003,0x04040404
+.size _${prefix}_consts,.-_${prefix}_consts
+
+.previous
+
 .globl	ChaCha20_ctr32_sve
 .type	ChaCha20_ctr32_sve,%function
 .align	5
@@ -738,7 +753,8 @@ ChaCha20_ctr32_sve:
 1:
 	cmp	$veclen,4
 	b.le	.Lreturn
-	adr	$tmp,.Lrot8
+	adrp	$tmp,.Lrot8
+	add	$tmp,$tmp,#:lo12:.Lrot8
 	ldp	$tmpw0,$tmpw1,[$tmp]
 	index	$rot8.s,$tmpw0,$tmpw1
 2:
@@ -756,7 +772,8 @@ ChaCha20_ctr32_sve:
 	stp	x28,x29,[sp,160]
 	str	x30,[sp,176]
 
-	adr	$tmp,.Lchacha20_consts
+	adrp	$tmp,.Lchacha20_consts
+	add	$tmp,$tmp,#:lo12:.Lchacha20_consts
 	ldp	@K[0],@K[1],[$tmp]
 	ldp	@K[2],@K[3],[$key]
 	ldp	@K[4],@K[5],[$key, 16]
@@ -858,7 +875,8 @@ my  %opcode_pred = (
 	"ld1w"         => 0xA540A000,
 	"ld1rw"        => 0x8540C000,
 	"lasta"        => 0x0520A000,
-	"revh"         => 0x05258000);
+	"revh"         => 0x05258000,
+	"revb"         => 0x05248000);
 
 my  %tsize = (
 	'b'          => 0,

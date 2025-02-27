@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2005-2023 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -150,7 +150,7 @@ static EVP_PKEY *evp_pkey_new0_key(void *key, int evp_type)
  * Read the MSBLOB header and get relevant data from it.
  *
  * |pisdss| and |pispub| have a double role, as they can be used for
- * discovery as well as to check the the blob meets expectations.
+ * discovery as well as to check the blob meets expectations.
  * |*pisdss| is the indicator for whether the key is a DSA key or not.
  * |*pispub| is the indicator for whether the key is public or not.
  * In both cases, the following input values apply:

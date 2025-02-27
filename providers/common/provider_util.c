@@ -18,6 +18,7 @@
 # include <openssl/engine.h>
 # include "crypto/evp.h"
 #endif
+#include "prov/providercommon.h"
 #include "prov/provider_util.h"
 
 void ossl_prov_cipher_reset(PROV_CIPHER *pc)
@@ -94,7 +95,7 @@ int ossl_prov_cipher_load_from_params(PROV_CIPHER *pc,
     const OSSL_PARAM *p;
     const char *propquery;
 
-    if (params == NULL)
+    if (ossl_param_is_empty(params))
         return 1;
 
     if (!load_common(params, &propquery, &pc->engine))
@@ -179,7 +180,7 @@ int ossl_prov_digest_load_from_params(PROV_DIGEST *pd,
     const OSSL_PARAM *p;
     const char *propquery;
 
-    if (params == NULL)
+    if (ossl_param_is_empty(params))
         return 1;
 
     if (!load_common(params, &propquery, &pd->engine))
@@ -208,6 +209,12 @@ int ossl_prov_digest_load_from_params(PROV_DIGEST *pd,
     else
         ERR_clear_last_mark();
     return pd->md != NULL;
+}
+
+void ossl_prov_digest_set_md(PROV_DIGEST *pd, EVP_MD *md)
+{
+    ossl_prov_digest_reset(pd);
+    pd->md = pd->alloc_md = md;
 }
 
 const EVP_MD *ossl_prov_digest_md(const PROV_DIGEST *pd)
