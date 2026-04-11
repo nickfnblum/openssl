@@ -19,9 +19,11 @@
 #include "testutil.h"
 #include "testutil/output.h"
 #include "../ssl/ssl_local.h"
+#include "../ssl/quic/quic_channel_local.h"
 #include "internal/quic_error.h"
 
 static OSSL_LIB_CTX *libctx = NULL;
+static char *propq = NULL;
 static OSSL_PROVIDER *defctxnull = NULL;
 static char *certsdir = NULL;
 static char *cert = NULL;
@@ -3424,6 +3426,165 @@ static int test_quic_peer_addr_v6(void)
         "::2", 4434);
 }
 
+/* Test ECH with quic */
+static int test_ech(void)
+{
+    /*
+     * Don't try this test if various ECC things are set of unavailable
+     * or we're in a no-ech build
+     */
+#if defined(OPENSSL_NO_EC) || defined(OPENSSL_NO_ECX) || defined(OPENSSL_NO_ECH)
+    propq = NULL; /* avoid unused var warning */
+    return 1;
+#else
+    SSL_CTX *cctx = NULL, *sctx = NULL;
+    SSL *clientquic = NULL;
+    char *rinner = NULL, *router = NULL;
+    const char *inner = "inner.example.com";
+    QUIC_TSERVER *qtserv = NULL;
+    int testresult = 0;
+    /* p256 ech key pair with public name server.example */
+    const char echpem[] = "-----BEGIN PRIVATE KEY-----\n"
+                          "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg+Ygt9nhASeoYbzo2\n"
+                          "Nz/jGFAdeTo25SVYWQvnf86qzbahRANCAARS9QqkjJU311J7kS8LsyISJ8xYFbJ5\n"
+                          "5BX/pu4QiFXJ3dEGrjYh4PDH/ehFfaqZgtRRg2r/AP+vwkLiP2mqCfdv\n"
+                          "-----END PRIVATE KEY-----\n"
+                          "-----BEGIN ECHCONFIG-----\n"
+                          "AGL+DQBezwAQAEEEUvUKpIyVN9dSe5EvC7MiEifMWBWyeeQV/6buEIhVyd3RBq42\n"
+                          "IeDwx/3oRX2qmYLUUYNq/wD/r8JC4j9pqgn3bwAEAAEAAQAOc2VydmVyLmV4YW1w\n"
+                          "bGUAAA==\n"
+                          "-----END ECHCONFIG-----\n";
+    const char ec_pub[] = "AGL+DQBezwAQAEEEUvUKpIyVN9dSe5EvC7MiEifMWBWyeeQV/6buEIhVyd3RBq42"
+                          "IeDwx/3oRX2qmYLUUYNq/wD/r8JC4j9pqgn3bwAEAAEAAQAOc2VydmVyLmV4YW1w"
+                          "bGUAAA==";
+    size_t ec_publen = sizeof(ec_pub) - 1;
+    BIO *in = NULL;
+    OSSL_ECHSTORE *es = NULL;
+
+    /* HPKE and FIPS are not friends, so don't test in that case */
+    if (is_fips) {
+        TEST_info("No real ECH test as is_fips is set\n");
+        return 1;
+    } else {
+        TEST_info("Doing real ECH test as is_fips is not set\n");
+    }
+
+    /* make an OSSL_ECHSTORE for echpem */
+    if ((in = BIO_new(BIO_s_mem())) == NULL
+        || BIO_write(in, echpem, (int)strlen(echpem)) <= 0
+        || !TEST_ptr(es = OSSL_ECHSTORE_new(libctx, propq))
+        || !TEST_true(OSSL_ECHSTORE_read_pem(es, in, OSSL_ECH_FOR_RETRY)))
+        goto err;
+
+    cctx = SSL_CTX_new_ex(libctx, NULL, OSSL_QUIC_client_method());
+    sctx = SSL_CTX_new_ex(libctx, NULL, TLS_method());
+    /* set OSSL_ECHSTORE for server */
+    if (!TEST_ptr(sctx) || !TEST_true(SSL_CTX_set1_echstore(sctx, es)))
+        goto err;
+
+    if (!TEST_ptr(cctx)
+        || !TEST_true(qtest_create_quic_objects(libctx, cctx, sctx, cert,
+            privkey,
+            QTEST_FLAG_FAKE_TIME,
+            &qtserv,
+            &clientquic, NULL, NULL)))
+        goto err;
+
+    /* set echconfig for client */
+    if (!TEST_true(SSL_set1_ech_config_list(clientquic,
+            (unsigned char *)ec_pub, ec_publen))
+        || !TEST_true(SSL_set_tlsext_host_name(clientquic, inner)))
+        goto err;
+    /* we expect the connection to succeed */
+    if (!TEST_true(qtest_create_quic_connection(qtserv, clientquic)))
+        goto err;
+    SSL_set_verify_result(clientquic, X509_V_OK);
+    if (!TEST_int_eq(SSL_ech_get1_status(clientquic, &rinner, &router),
+            SSL_ECH_STATUS_SUCCESS))
+        goto err;
+
+    testresult = 1;
+err:
+    ossl_quic_tserver_free(qtserv);
+    SSL_free(clientquic);
+    OPENSSL_free(router);
+    OPENSSL_free(rinner);
+    SSL_CTX_free(cctx);
+    SSL_CTX_free(sctx);
+    OSSL_ECHSTORE_free(es);
+    BIO_free_all(in);
+
+    return testresult;
+#endif
+}
+
+static int test_quic_resize_txe(void)
+{
+    SSL_CTX *cctx = NULL;
+    SSL *clientquic = NULL;
+    QUIC_TSERVER *qtserv = NULL;
+    QUIC_CHANNEL *ch = NULL;
+    unsigned char msg[] = "resize test";
+    unsigned char buf[sizeof(msg)];
+    size_t numbytes = 0;
+    int ret = 0;
+
+    if (!TEST_ptr(cctx = SSL_CTX_new_ex(libctx, NULL, OSSL_QUIC_client_method())))
+        goto end;
+
+    if (!TEST_true(qtest_create_quic_objects(libctx, cctx, NULL,
+            cert, privkey, 0,
+            &qtserv, &clientquic,
+            NULL, NULL)))
+        goto end;
+
+    if (!TEST_true(qtest_create_quic_connection(qtserv, clientquic)))
+        goto end;
+
+    /*
+     * Client writes first to open stream 0 (client-initiated bidirectional).
+     * The server must see the stream before it can write back on it.
+     */
+    if (!TEST_true(SSL_write_ex(clientquic, msg, sizeof(msg), &numbytes))
+        || !TEST_size_t_eq(numbytes, sizeof(msg)))
+        goto end;
+
+    ossl_quic_tserver_tick(qtserv);
+    if (!TEST_true(ossl_quic_tserver_read(qtserv, 0, buf, sizeof(buf),
+            &numbytes)))
+        goto end;
+
+    /*
+     * Increase the server's QTX MDPL above the initial allocation size
+     * (QUIC_MIN_INITIAL_DGRAM_LEN = 1200). All TXEs in the free list have
+     * alloc_len = 1200, so the next write will trigger qtx_resize_txe.
+     */
+    ch = ossl_quic_tserver_get_channel(qtserv);
+    if (!TEST_true(ossl_qtx_set_mdpl(ch->qtx,
+            QUIC_MIN_INITIAL_DGRAM_LEN + 250)))
+        goto end;
+
+    /* Trigger a server write: exercises qtx_resize_txe via qtx_reserve_txe */
+    if (!TEST_true(ossl_quic_tserver_write(qtserv, 0,
+            msg, sizeof(msg), &numbytes))
+        || !TEST_size_t_eq(numbytes, sizeof(msg)))
+        goto end;
+
+    ossl_quic_tserver_tick(qtserv);
+    SSL_handle_events(clientquic);
+
+    if (!TEST_true(SSL_read_ex(clientquic, buf, sizeof(buf), &numbytes))
+        || !TEST_mem_eq(buf, numbytes, msg, sizeof(msg)))
+        goto end;
+
+    ret = 1;
+end:
+    ossl_quic_tserver_free(qtserv);
+    SSL_free(clientquic);
+    SSL_CTX_free(cctx);
+    return ret;
+}
+
 /***********************************************************************************/
 OPT_TEST_DECLARE_USAGE("provider config certsdir datadir\n")
 
@@ -3531,6 +3692,8 @@ int setup_tests(void)
     ADD_TEST(test_client_hello_retry);
     ADD_TEST(test_quic_peer_addr_v6);
     ADD_TEST(test_quic_peer_addr_v4);
+    ADD_TEST(test_ech);
+    ADD_TEST(test_quic_resize_txe);
 
     return 1;
 err:
